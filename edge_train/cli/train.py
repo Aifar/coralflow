@@ -6,7 +6,7 @@ import time
 import click
 
 from edge_train.config import load_config
-from edge_train.cloud.vertex import submit_automl_job, poll_job, Modality
+from edge_train.cloud import submit_automl_job, poll_job, Modality
 
 
 @click.command()
@@ -30,7 +30,7 @@ def train(dataset: str, modality: str | None, target: str | None, timeout: int):
 
     from edge_train.datasets import infer_modality_from_path
 
-    resolved_modality = Modality(modality) if modality else infer_modality_from_path(dataset)
+    resolved_modality = Modality(modality) if modality else Modality(infer_modality_from_path(dataset))
     click.echo(f"  Modality: {resolved_modality.value}")
     click.echo(f"  Dataset: {dataset}")
     click.echo(f"  GCP Project: {gcp.project_id}")

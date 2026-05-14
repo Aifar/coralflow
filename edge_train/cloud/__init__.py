@@ -43,7 +43,7 @@ def submit_automl_job(
 def poll_job(job_name: str, deadline: float) -> dict[str, Any]:
     """Poll a training job until completion or timeout."""
     while time.time() < deadline:
-        job = aip.PipelineJob.get(job_name)
+        job = aip.PipelineJob.get(resource_name=job_name)
         state = job.state
 
         if state == "PIPELINE_STATE_SUCCEEDED":
@@ -61,44 +61,58 @@ def _create_or_get_dataset(
     modality: Modality,
     project: str,
     location: str,
-) -> aip.Dataset:
+) -> aip.TextDataset | aip.ImageDataset | aip.TabularDataset:
+    """Create a Vertex AI dataset and import data from the given path."""
     mapping = {
-        Modality.TEXT: "text_classification",
-        Modality.IMAGE: "image_classification",
-        Modality.TABLE: "tabular",
+        Modality.TEXT: ("text_classification", aip.TextDataset),
+        Modality.IMAGE: ("image_classification", aip.ImageDataset),
+        Modality.TABLE: ("tabular", aip.TabularDataset),
     }
+    schema_type, dataset_cls = mapping[modality]
     import_uri = path if path.startswith("gs://") else _upload_to_gcs(path, project, location)
-    dataset = aip.Dataset.create(
+
+    dataset = dataset_cls.create(
         display_name=f"edge-train-{int(time.time())}",
-        metadata_schema_uri=f"gs://google-cloud-aiplatform/schema/dataset/metadata/{mapping[modality]}_schema.yaml",
+        gcs_source=import_uri,
+        import_schema_uri=f"gs://google-cloud-aiplatform/schema/dataset/metadata/{schema_type}_schema.yaml",
+        project=project,
+        location=location,
     )
-    dataset.import_data([{"uri": import_uri}])
     return dataset
 
 
 def _launch_training_pipeline(
-    dataset: aip.Dataset,
+    dataset: aip.TextDataset | aip.ImageDataset | aip.TabularDataset,
     modality: Modality,
     target_column: str | None,
 ) -> str:
-    training_pipelines = {
+    """Launch an AutoML training pipeline on the given dataset."""
+    prediction_type = {
         Modality.TEXT: "text_classification",
         Modality.IMAGE: "image_classification",
         Modality.TABLE: "tabular",
-    }
-    job = aip.AutoMLTabularTrainingJob if modality == Modality.TABLE else aip.AutoMLImageTrainingJob
-    pipeline = job(
+    }[modality]
+
+    training_cls = {
+        Modality.TEXT: aip.AutoMLTextTrainingJob,
+        Modality.IMAGE: aip.AutoMLImageTrainingJob,
+        Modality.TABLE: aip.AutoMLTabularTrainingJob,
+    }[modality]
+
+    job = training_cls(
         display_name=f"edge-train-pipeline-{int(time.time())}",
-        prediction_type=training_pipelines[modality],
+        prediction_type=prediction_type,
     )
-    pipeline.run(dataset=dataset, target_column=target_column or "label")
-    return pipeline.resource_name
+    job.run(dataset=dataset, target_column=target_column or "label")
+    return job.resource_name
 
 
 def _extract_result(job: aip.PipelineJob) -> dict[str, Any]:
+    gca_resource = getattr(job, "_gca_resource", None)
+    model_path = gca_resource.endpoint.model if gca_resource and hasattr(gca_resource, "endpoint") else ""
     return {
         "job_name": job.resource_name,
-        "model_path": job._gca_resource.endpoint.model or "",
+        "model_path": model_path,
         "accuracy": 0.0,
     }
 
