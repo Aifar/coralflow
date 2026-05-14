@@ -1,0 +1,4 @@
+click>=8.0
+google-cloud-aiplatform>=1.38
+tensorflow>=2.13
+aiohttp>=3.9
