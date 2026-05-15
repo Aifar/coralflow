@@ -62,7 +62,9 @@ class TestInferModality:
     def test_csv_numeric(self, temp_dir):
         """Mostly numeric columns → table modality."""
         path = temp_dir / "data.csv"
-        path.write_text("age,height,score,label\n25,180,95,A\n30,170,88,B\n", encoding="utf-8")
+        path.write_text(
+            "age,height,score,label\n25,180,95,A\n30,170,88,B\n", encoding="utf-8"
+        )
         assert infer_modality(path) == "table"
 
     def test_image_extensions(self, temp_dir):

@@ -136,7 +136,15 @@ def _infer_modality_from_csv(path: Path) -> str:
         return "text"
 
     headers = [h for h in (reader.fieldnames or sample[0].keys()) if h.strip()]
-    text_keywords = {"text", "message", "content", "sentence", "review", "comment", "description"}
+    text_keywords = {
+        "text",
+        "message",
+        "content",
+        "sentence",
+        "review",
+        "comment",
+        "description",
+    }
     text_headers = [h for h in headers if h.lower() in text_keywords]
 
     if text_headers:

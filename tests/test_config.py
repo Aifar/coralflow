@@ -7,7 +7,11 @@ from edge_train.config import GCPConfig, ArizeConfig, TrainConfig, load_config
 
 class TestGCPConfig:
     def test_valid(self):
-        cfg = GCPConfig(project_id="my-project", location="us-central1", staging_bucket="gs://bucket")
+        cfg = GCPConfig(
+            project_id="my-project",
+            location="us-central1",
+            staging_bucket="gs://bucket",
+        )
         assert cfg.is_valid()
 
     def test_invalid_when_empty(self):
@@ -17,7 +21,9 @@ class TestGCPConfig:
 
 class TestArizeConfig:
     def test_valid(self):
-        cfg = ArizeConfig(api_key="ak_xxx", space_key="sk_xxx", endpoint="https://api.arize.com")
+        cfg = ArizeConfig(
+            api_key="ak_xxx", space_key="sk_xxx", endpoint="https://api.arize.com"
+        )
         assert cfg.is_valid()
 
     def test_invalid_when_missing_keys(self):

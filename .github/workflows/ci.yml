@@ -25,6 +25,6 @@ jobs:
           pip install -e .
           pip install pytest black
       - name: Check formatting with black
-        run: black --check edge_train/ tests/
+        run: black --check --target-version py310 edge_train/ tests/
       - name: Run tests
         run: pytest tests/ -v

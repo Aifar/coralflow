@@ -85,7 +85,9 @@ class TestDeployCommand:
         assert "--model" in result.output
 
     def test_deploy_missing_model(self, runner):
-        result = runner.invoke(deploy, ["--model", "/nonexistent/model.tflite", "--host", "10.0.0.1"])
+        result = runner.invoke(
+            deploy, ["--model", "/nonexistent/model.tflite", "--host", "10.0.0.1"]
+        )
         assert result.exit_code != 0
 
     def test_deploy_no_device(self, runner, tmp_path):
@@ -106,7 +108,9 @@ class TestDeployCommand:
                 success=True, device_id="ephemeral-10.0.0.1", elapsed_sec=2.35
             )
 
-        monkeypatch.setattr(sys.modules["edge_train.cli.deploy"], "_deploy_model", mock_deploy)
+        monkeypatch.setattr(
+            sys.modules["edge_train.cli.deploy"], "_deploy_model", mock_deploy
+        )
 
         result = runner.invoke(deploy, ["--model", str(tflite), "--host", "10.0.0.1"])
         assert result.exit_code == 0, result.output
@@ -122,7 +126,9 @@ class TestDeployCommand:
         async def mock_deploy(model_path, **kwargs):
             return DeployResult(success=False, error="Connection failed")
 
-        monkeypatch.setattr(sys.modules["edge_train.cli.deploy"], "_deploy_model", mock_deploy)
+        monkeypatch.setattr(
+            sys.modules["edge_train.cli.deploy"], "_deploy_model", mock_deploy
+        )
 
         result = runner.invoke(deploy, ["--model", str(tflite), "--host", "10.0.0.1"])
         assert result.exit_code != 0

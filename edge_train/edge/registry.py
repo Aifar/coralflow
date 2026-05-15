@@ -54,9 +54,5 @@ class DeviceRegistry:
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "devices": {
-                did: asdict(info) for did, info in self._devices.items()
-            }
-        }
+        data = {"devices": {did: asdict(info) for did, info in self._devices.items()}}
         self._path.write_text(json.dumps(data, indent=2))

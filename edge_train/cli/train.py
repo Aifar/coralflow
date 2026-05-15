@@ -11,8 +11,13 @@ from edge_train.cloud import submit_automl_job, poll_job, Modality
 
 @click.command()
 @click.option("--dataset", "-d", required=True, help="Path to training dataset CSV")
-@click.option("--type", "modality", type=click.Choice(["text", "image", "table"]), default=None,
-              help="Override modality auto-detection")
+@click.option(
+    "--type",
+    "modality",
+    type=click.Choice(["text", "image", "table"]),
+    default=None,
+    help="Override modality auto-detection",
+)
 @click.option("--target", default=None, help="Target column name (for CSV)")
 @click.option("--timeout", default=30, help="Max training wait time in minutes")
 def train(dataset: str, modality: str | None, target: str | None, timeout: int):
@@ -30,7 +35,9 @@ def train(dataset: str, modality: str | None, target: str | None, timeout: int):
 
     from edge_train.datasets import infer_modality_from_path
 
-    resolved_modality = Modality(modality) if modality else Modality(infer_modality_from_path(dataset))
+    resolved_modality = (
+        Modality(modality) if modality else Modality(infer_modality_from_path(dataset))
+    )
     click.echo(f"  Modality: {resolved_modality.value}")
     click.echo(f"  Dataset: {dataset}")
     click.echo(f"  GCP Project: {gcp.project_id}")

@@ -69,9 +69,7 @@ async def deploy_model(
     try:
         package = ModelPackage(model, version=ver, modality=modality)
     except (FileNotFoundError, ValueError) as e:
-        return DeployResult(
-            success=False, model_path=model_path, error=str(e)
-        )
+        return DeployResult(success=False, model_path=model_path, error=str(e))
 
     # Step 3: Resolve device
     resolved: DeviceInfo | None = None
@@ -84,9 +82,7 @@ async def deploy_model(
                 error=f"Unknown device: {device_id}",
             )
     elif host:
-        resolved = DeviceInfo(
-            device_id=f"ephemeral-{host}", host=host, port=port
-        )
+        resolved = DeviceInfo(device_id=f"ephemeral-{host}", host=host, port=port)
     else:
         return DeployResult(
             success=False,

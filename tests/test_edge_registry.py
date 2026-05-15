@@ -64,6 +64,7 @@ class TestDeviceRegistry:
         path.write_text("not valid json")
         import json as j
         import pytest
+
         with pytest.raises(j.JSONDecodeError):
             DeviceRegistry(path)
 

@@ -6,8 +6,12 @@ from edge_train.datasets import list_builtin
 
 @click.command()
 @click.argument("dataset_name", required=False)
-@click.option("--hours", type=float, default=None,
-              help="Estimated training hours (overrides auto-estimate)")
+@click.option(
+    "--hours",
+    type=float,
+    default=None,
+    help="Estimated training hours (overrides auto-estimate)",
+)
 def cost(dataset_name: str | None, hours: float | None):
     """Estimate Vertex AI training costs for a dataset.
 
@@ -24,7 +28,9 @@ def cost(dataset_name: str | None, hours: float | None):
     if dataset_name:
         builtins = list_builtin()
         if dataset_name not in builtins:
-            click.echo(f"Unknown dataset '{dataset_name}'. Use 'edge-train init list' to see options.")
+            click.echo(
+                f"Unknown dataset '{dataset_name}'. Use 'edge-train init list' to see options."
+            )
             return
 
         info = builtins[dataset_name]

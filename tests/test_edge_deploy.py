@@ -65,9 +65,7 @@ class TestDeployModel:
         tflite.write_bytes(b"data")
         reg = DeviceRegistry(tmp_path / "registry.json")
 
-        result = await deploy_model(
-            str(tflite), device_id="unknown", registry=reg
-        )
+        result = await deploy_model(str(tflite), device_id="unknown", registry=reg)
         assert not result.success
         assert "Unknown device" in result.error
 
@@ -100,9 +98,7 @@ class TestDeployModel:
         transport.connect.return_value = False
         transport.disconnect = AsyncMock()
 
-        result = await deploy_model(
-            str(tflite), host="10.0.0.1", transport=transport
-        )
+        result = await deploy_model(str(tflite), host="10.0.0.1", transport=transport)
         assert not result.success
         assert "Connection refused" in result.error
 
@@ -134,9 +130,7 @@ class TestDeployModel:
         transport.verify_checksum.return_value = False
         transport.disconnect = AsyncMock()
 
-        result = await deploy_model(
-            str(tflite), host="10.0.0.1", transport=transport
-        )
+        result = await deploy_model(str(tflite), host="10.0.0.1", transport=transport)
         assert not result.success
         assert "Checksum mismatch" in result.error
 
@@ -166,9 +160,7 @@ class TestDeployModel:
         transport.connect.side_effect = asyncio.TimeoutError("Connection timed out")
         transport.disconnect = AsyncMock()
 
-        result = await deploy_model(
-            str(tflite), host="10.0.0.1", transport=transport
-        )
+        result = await deploy_model(str(tflite), host="10.0.0.1", transport=transport)
         assert not result.success
         assert "Timeout" in result.error
 
@@ -182,8 +174,6 @@ class TestDeployModel:
         transport.push_model.return_value = False
         transport.disconnect = AsyncMock()
 
-        result = await deploy_model(
-            str(tflite), host="10.0.0.1", transport=transport
-        )
+        result = await deploy_model(str(tflite), host="10.0.0.1", transport=transport)
         assert not result.success
         transport.disconnect.assert_awaited_once()

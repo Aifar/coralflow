@@ -69,7 +69,9 @@ def _create_or_get_dataset(
         Modality.TABLE: ("tabular", aip.TabularDataset),
     }
     schema_type, dataset_cls = mapping[modality]
-    import_uri = path if path.startswith("gs://") else _upload_to_gcs(path, project, location)
+    import_uri = (
+        path if path.startswith("gs://") else _upload_to_gcs(path, project, location)
+    )
 
     dataset = dataset_cls.create(
         display_name=f"edge-train-{int(time.time())}",
@@ -109,7 +111,11 @@ def _launch_training_pipeline(
 
 def _extract_result(job: aip.PipelineJob) -> dict[str, Any]:
     gca_resource = getattr(job, "_gca_resource", None)
-    model_path = gca_resource.endpoint.model if gca_resource and hasattr(gca_resource, "endpoint") else ""
+    model_path = (
+        gca_resource.endpoint.model
+        if gca_resource and hasattr(gca_resource, "endpoint")
+        else ""
+    )
     return {
         "job_name": job.resource_name,
         "model_path": model_path,

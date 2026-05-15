@@ -86,8 +86,14 @@ def _validate_text_csv(path: Path) -> None:
         sys.exit(1)
 
     headers = reader.fieldnames or []
-    text_cols = [c for c in headers if c.lower() in ("text", "message", "content", "sentence")]
-    label_cols = [c for c in headers if c.lower() in ("label", "category", "class", "intent", "urgency")]
+    text_cols = [
+        c for c in headers if c.lower() in ("text", "message", "content", "sentence")
+    ]
+    label_cols = [
+        c
+        for c in headers
+        if c.lower() in ("label", "category", "class", "intent", "urgency")
+    ]
 
     if not text_cols and not label_cols:
         click.echo(
@@ -98,7 +104,9 @@ def _validate_text_csv(path: Path) -> None:
         sys.exit(1)
 
     if not text_cols:
-        click.echo("Warning: No obvious text column found. Using first column.", err=True)
+        click.echo(
+            "Warning: No obvious text column found. Using first column.", err=True
+        )
         text_col = headers[0]
     else:
         text_col = text_cols[0]
@@ -119,4 +127,6 @@ def _validate_text_csv(path: Path) -> None:
     # warn on severe imbalance
     ratios = [c / len(rows) for c in label_counts.values()]
     if ratios and max(ratios) > 0.8:
-        click.echo("  Warning: Dataset is heavily imbalanced (>80% in one class).", err=True)
+        click.echo(
+            "  Warning: Dataset is heavily imbalanced (>80% in one class).", err=True
+        )
