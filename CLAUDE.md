@@ -43,6 +43,10 @@ source .venv/bin/activate
 uv pip install -e ".[dev]"
 ```
 
+### Commits
+- Never include `Co-Authored-By` trailers in commit messages
+- Use conventional commit prefixes: `feat:`, `fix:`, `style:`, `test:`, `chore:`
+
 ### Run all tests
 ```bash
 source .venv/bin/activate && python -m pytest tests/ -v
