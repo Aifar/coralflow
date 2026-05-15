@@ -35,11 +35,14 @@ class TestTrainConfig:
 
 
 class TestLoadConfig:
-    def test_load_config_returns_triple(self, clear_env):
-        gcp, arize, train = load_config()
+    def test_load_config_returns_quad(self, clear_env):
+        gcp, arize, train, edge = load_config()
         assert isinstance(gcp, GCPConfig)
         assert isinstance(arize, ArizeConfig)
         assert isinstance(train, TrainConfig)
+        from edge_train.edge.config import EdgeConfig
+
+        assert isinstance(edge, EdgeConfig)
 
     def test_load_config_from_env(self, clear_env):
         os.environ["GCP_PROJECT"] = "test-project"
@@ -48,7 +51,7 @@ class TestLoadConfig:
         os.environ["ARIZE_API_KEY"] = "test-key"
         os.environ["ARIZE_SPACE_KEY"] = "test-space"
 
-        gcp, arize, _ = load_config()
+        gcp, arize, _, _ = load_config()
         assert gcp.project_id == "test-project"
         assert gcp.location == "europe-west4"
         assert gcp.staging_bucket == "gs://my-bucket"

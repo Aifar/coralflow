@@ -20,7 +20,7 @@ def train(dataset: str, modality: str | None, target: str | None, timeout: int):
 
     The modality is auto-detected from the dataset unless --type is specified.
     """
-    gcp, _, train_cfg = load_config()
+    gcp, _, train_cfg, _ = load_config()
     if not gcp.is_valid():
         click.echo(
             "Error: GCP not configured. Set GCP_PROJECT and GCP_STAGING_BUCKET env vars.",

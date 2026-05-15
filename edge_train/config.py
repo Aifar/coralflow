@@ -1,4 +1,4 @@
-"""Configuration for GCP and Arize credentials."""
+"""Configuration for GCP, Arize, and edge device credentials."""
 
 import os
 from dataclasses import dataclass, field
@@ -33,5 +33,8 @@ class TrainConfig:
     training_timeout_min: int = 30
 
 
-def load_config() -> tuple[GCPConfig, ArizeConfig, TrainConfig]:
-    return GCPConfig(), ArizeConfig(), TrainConfig()
+from edge_train.edge.config import EdgeConfig
+
+
+def load_config() -> tuple[GCPConfig, ArizeConfig, TrainConfig, EdgeConfig]:
+    return GCPConfig(), ArizeConfig(), TrainConfig(), EdgeConfig()

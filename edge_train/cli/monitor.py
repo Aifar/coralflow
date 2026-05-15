@@ -14,7 +14,7 @@ def monitor(dashboard: bool, status: bool):
     """
     from edge_train.config import load_config
 
-    _, arize, _ = load_config()
+    _, arize, _, _ = load_config()
 
     if not arize.is_valid():
         click.echo("  Arize not configured. Set ARIZE_API_KEY and ARIZE_SPACE_KEY.")

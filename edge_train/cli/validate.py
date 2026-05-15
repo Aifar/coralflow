@@ -21,9 +21,9 @@ def validate(model: str, output: str, force: bool):
     - Estimated inference latency < 50 ms on target CPU
     - Accuracy loss after quantization < 2% (requires validation dataset)
     """
-    from edge_train.validation.tflite import convert_to_tflite, check_size_constraint, estimate_latency
+    from edge_train.validation import convert_to_tflite, check_size_constraint, estimate_latency
 
-    _, _, train_cfg = load_config()
+    _, _, train_cfg, _ = load_config()
     model_path = Path(model)
 
     if not model_path.exists():

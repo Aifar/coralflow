@@ -1,5 +1,7 @@
 """Tests for edge_train.cli commands."""
 
+import sys
+
 import pytest
 from click.testing import CliRunner
 
@@ -77,8 +79,51 @@ class TestMonitorCommand:
 
 
 class TestDeployCommand:
-    def test_deploy(self, runner):
-        # --model is required, so no args should show help/error
-        result = runner.invoke(deploy, ["--model", "/fake/model.tflite"])
-        assert result.exit_code == 0
-        assert "coming in edge-train v0.2.0" in result.output
+    def test_deploy_no_args(self, runner):
+        result = runner.invoke(deploy, [])
+        assert result.exit_code != 0
+        assert "--model" in result.output
+
+    def test_deploy_missing_model(self, runner):
+        result = runner.invoke(deploy, ["--model", "/nonexistent/model.tflite", "--host", "10.0.0.1"])
+        assert result.exit_code != 0
+
+    def test_deploy_no_device(self, runner, tmp_path):
+        tflite = tmp_path / "model.tflite"
+        tflite.write_bytes(b"fake model")
+        result = runner.invoke(deploy, ["--model", str(tflite)])
+        assert result.exit_code != 0
+        assert "device" in result.output.lower()
+
+    def test_deploy_success(self, runner, tmp_path, monkeypatch):
+        from edge_train.edge.deploy import DeployResult
+
+        tflite = tmp_path / "model.tflite"
+        tflite.write_bytes(b"fake model")
+
+        async def mock_deploy(model_path, **kwargs):
+            return DeployResult(
+                success=True, device_id="ephemeral-10.0.0.1", elapsed_sec=2.35
+            )
+
+        monkeypatch.setattr(sys.modules["edge_train.cli.deploy"], "_deploy_model", mock_deploy)
+
+        result = runner.invoke(deploy, ["--model", str(tflite), "--host", "10.0.0.1"])
+        assert result.exit_code == 0, result.output
+        assert "Deployed" in result.output or "done" in result.output.lower()
+        assert "ephemeral-10.0.0.1" in result.output
+
+    def test_deploy_failure(self, runner, tmp_path, monkeypatch):
+        from edge_train.edge.deploy import DeployResult
+
+        tflite = tmp_path / "model.tflite"
+        tflite.write_bytes(b"fake model")
+
+        async def mock_deploy(model_path, **kwargs):
+            return DeployResult(success=False, error="Connection failed")
+
+        monkeypatch.setattr(sys.modules["edge_train.cli.deploy"], "_deploy_model", mock_deploy)
+
+        result = runner.invoke(deploy, ["--model", str(tflite), "--host", "10.0.0.1"])
+        assert result.exit_code != 0
+        assert "Connection failed" in result.output
