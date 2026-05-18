@@ -1,5 +1,6 @@
 """Tests for edge_train.cli commands."""
 
+import builtins
 import sys
 
 import pytest
@@ -16,6 +17,19 @@ from edge_train.cli.deploy import deploy
 @pytest.fixture
 def runner():
     return CliRunner()
+
+
+@pytest.fixture
+def mock_phoenix(mocker):
+    """Inject mock phoenix.otel into sys.modules so tests don't need the real package."""
+    phoenix_mod = mocker.MagicMock()
+    otel_mod = mocker.MagicMock()
+    phoenix_mod.otel = otel_mod
+    sys.modules["phoenix"] = phoenix_mod
+    sys.modules["phoenix.otel"] = otel_mod
+    yield otel_mod
+    sys.modules.pop("phoenix", None)
+    sys.modules.pop("phoenix.otel", None)
 
 
 class TestMainCLI:
@@ -73,9 +87,113 @@ class TestValidateCommand:
 
 
 class TestMonitorCommand:
-    def test_monitor_no_args(self, runner):
+    def test_monitor_not_configured(self, runner, clear_env):
         result = runner.invoke(monitor, [])
         assert result.exit_code == 0
+        assert "not configured" in result.output.lower()
+
+    def test_monitor_status_not_configured(self, runner, clear_env):
+        result = runner.invoke(monitor, ["--status"])
+        assert result.exit_code == 0
+        assert "not configured" in result.output.lower()
+        assert "edge-train" in result.output
+
+    def test_monitor_status_configured(
+        self, runner, clear_env, monkeypatch, mock_phoenix
+    ):
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"
+        )
+        monkeypatch.setenv("PHOENIX_PROJECT_NAME", "my-project")
+
+        result = runner.invoke(monitor, ["--status"])
+        assert result.exit_code == 0
+        assert "https://example.com/v1/traces" in result.output
+        assert "my-project" in result.output
+        assert "configured" in result.output
+        assert "connected" in result.output
+        mock_phoenix.register.assert_called_once()
+
+    def test_monitor_register_prints_info(
+        self, runner, clear_env, monkeypatch, mock_phoenix
+    ):
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"
+        )
+
+        result = runner.invoke(monitor, [])
+        assert result.exit_code == 0
+        assert "registered" in result.output.lower()
+        assert "https://example.com/v1/traces" in result.output
+        mock_phoenix.register.assert_called_once_with(
+            endpoint="https://example.com/v1/traces",
+            project_name="edge-train",
+            auto_instrument=False,
+        )
+
+    def test_monitor_dashboard(
+        self, runner, clear_env, monkeypatch, mock_phoenix, mocker
+    ):
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://app.phoenix.arize.com/v1/traces"
+        )
+        mock_open = mocker.patch("webbrowser.open")
+
+        result = runner.invoke(monitor, ["--dashboard"])
+        assert result.exit_code == 0
+        assert "https://app.phoenix.arize.com" in result.output
+        mock_open.assert_called_once_with("https://app.phoenix.arize.com")
+
+    def test_monitor_dashboard_derived_url(
+        self, runner, clear_env, monkeypatch, mock_phoenix, mocker
+    ):
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://phoenix.example.com/v1/traces"
+        )
+        mock_open = mocker.patch("webbrowser.open")
+
+        result = runner.invoke(monitor, ["--dashboard"])
+        assert result.exit_code == 0
+        mock_open.assert_called_once_with("https://phoenix.example.com")
+
+    def test_monitor_registration_failure(
+        self, runner, clear_env, monkeypatch, mock_phoenix
+    ):
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"
+        )
+        mock_phoenix.register.side_effect = RuntimeError("Connection refused")
+
+        result = runner.invoke(monitor, [])
+        assert result.exit_code == 0
+        assert "Connection refused" in result.output
+
+    def test_monitor_import_error(self, runner, clear_env, monkeypatch):
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"
+        )
+
+        # Remove phoenix from sys.modules so the import path is exercised
+        sys.modules.pop("phoenix", None)
+        sys.modules.pop("phoenix.otel", None)
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name in ("phoenix", "phoenix.otel"):
+                raise ImportError("No module named 'phoenix'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+        result = runner.invoke(monitor, [])
+        assert result.exit_code == 0
+        assert "arize-phoenix-otel" in result.output
 
 
 class TestDeployCommand:

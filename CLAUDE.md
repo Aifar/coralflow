@@ -66,7 +66,9 @@ source .venv/bin/activate && python -c "from edge_train.cli import main; main(['
 ### Config
 All config reads from environment variables:
 - `GCP_PROJECT`, `GCP_LOCATION`, `GCP_STAGING_BUCKET` — GCP config
-- `ARIZE_API_KEY`, `ARIZE_SPACE_KEY`, `ARIZE_ENDPOINT` — Arize AI monitoring
+- `PHOENIX_API_KEY`, `PHOENIX_COLLECTOR_ENDPOINT` — Arize Phoenix OTEL tracing
+  - `PHOENIX_PROJECT_NAME` (optional, default: `edge-train`) — project name in Phoenix dashboard
+  - `PHOENIX_COLLECTOR_ENDPOINT` defaults to `https://app.phoenix.arize.com/v1/traces`
 - `EDGE_REGISTRY_PATH` — device registry file path
 
 ### Versioning

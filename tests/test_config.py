@@ -22,12 +22,21 @@ class TestGCPConfig:
 class TestArizeConfig:
     def test_valid(self):
         cfg = ArizeConfig(
-            api_key="ak_xxx", space_key="sk_xxx", endpoint="https://api.arize.com"
+            api_key="phx_xxx",
+            collector_endpoint="https://app.phoenix.arize.com/v1/traces",
+            project_name="my-project",
         )
         assert cfg.is_valid()
 
     def test_invalid_when_missing_keys(self):
-        cfg = ArizeConfig(api_key="", space_key="", endpoint="")
+        cfg = ArizeConfig(api_key="", collector_endpoint="", project_name="")
+        assert not cfg.is_valid()
+
+    def test_defaults(self):
+        cfg = ArizeConfig()
+        assert cfg.collector_endpoint == "https://app.phoenix.arize.com/v1/traces"
+        assert cfg.project_name == "edge-train"
+        assert cfg.api_key == ""
         assert not cfg.is_valid()
 
 
@@ -54,12 +63,14 @@ class TestLoadConfig:
         os.environ["GCP_PROJECT"] = "test-project"
         os.environ["GCP_LOCATION"] = "europe-west4"
         os.environ["GCP_STAGING_BUCKET"] = "gs://my-bucket"
-        os.environ["ARIZE_API_KEY"] = "test-key"
-        os.environ["ARIZE_SPACE_KEY"] = "test-space"
+        os.environ["PHOENIX_API_KEY"] = "test-key"
+        os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://example.com/v1/traces"
+        os.environ["PHOENIX_PROJECT_NAME"] = "my-edge-project"
 
         gcp, arize, _, _ = load_config()
         assert gcp.project_id == "test-project"
         assert gcp.location == "europe-west4"
         assert gcp.staging_bucket == "gs://my-bucket"
         assert arize.api_key == "test-key"
-        assert arize.space_key == "test-space"
+        assert arize.collector_endpoint == "https://example.com/v1/traces"
+        assert arize.project_name == "my-edge-project"

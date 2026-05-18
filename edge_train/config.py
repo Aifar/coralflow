@@ -2,7 +2,16 @@
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+# Auto-load .env from project root or current directory
+_dotenv_path = Path(".env")
+if not _dotenv_path.exists():
+    _dotenv_path = Path(__file__).parent.parent / ".env"
+if _dotenv_path.exists():
+    from dotenv import load_dotenv
+    load_dotenv(_dotenv_path)
 
 
 @dataclass
@@ -21,18 +30,19 @@ class GCPConfig:
 
 @dataclass
 class ArizeConfig:
-    api_key: str = field(default_factory=lambda: os.environ.get("ARIZE_API_KEY", ""))
-    space_key: str = field(
-        default_factory=lambda: os.environ.get("ARIZE_SPACE_KEY", "")
-    )
-    endpoint: str = field(
+    api_key: str = field(default_factory=lambda: os.environ.get("PHOENIX_API_KEY", ""))
+    collector_endpoint: str = field(
         default_factory=lambda: os.environ.get(
-            "ARIZE_ENDPOINT", "https://api.arize.com"
+            "PHOENIX_COLLECTOR_ENDPOINT",
+            "https://app.phoenix.arize.com/v1/traces",
         )
+    )
+    project_name: str = field(
+        default_factory=lambda: os.environ.get("PHOENIX_PROJECT_NAME", "edge-train")
     )
 
     def is_valid(self) -> bool:
-        return bool(self.api_key and self.space_key)
+        return bool(self.api_key and self.collector_endpoint)
 
 
 @dataclass

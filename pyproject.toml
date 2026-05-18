@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "edge-train"
-version = "0.1.0"
+version = "0.2.1"
 description = "TinyML continuous training agent — dataset in, model out, deploy, monitor, auto-retrain"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,8 +19,10 @@ classifiers = [
 ]
 
 dependencies = [
+    "arize-phoenix-otel>=0.16",
     "click>=8.0",
     "google-cloud-aiplatform>=1.38",
+    "python-dotenv>=1.0",
     "tensorflow>=2.13",
     "aiohttp>=3.9",
 ]
