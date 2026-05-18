@@ -11,6 +11,7 @@ if not _dotenv_path.exists():
     _dotenv_path = Path(__file__).parent.parent / ".env"
 if _dotenv_path.exists():
     from dotenv import load_dotenv
+
     load_dotenv(_dotenv_path)
 
 

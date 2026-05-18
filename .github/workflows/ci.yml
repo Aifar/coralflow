@@ -22,8 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest black pytest-asyncio pytest-mock
+          pip install -e ".[dev]"
       - name: Check formatting with black
         run: black --check --target-version py310 edge_train/ tests/
       - name: Run tests
