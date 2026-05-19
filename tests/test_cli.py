@@ -13,6 +13,7 @@ from edge_train.cli.validate import validate
 from edge_train.cli.monitor import monitor
 from edge_train.cli.deploy import deploy
 from edge_train.cli.train import train
+from edge_train.cli.predict import predict
 
 
 @pytest.fixture
@@ -283,3 +284,92 @@ class TestDeployCommand:
         result = runner.invoke(deploy, ["--model", str(tflite), "--host", "10.0.0.1"])
         assert result.exit_code != 0
         assert "Connection failed" in result.output
+
+
+class TestPredictCommand:
+    def test_predict_help(self, runner):
+        result = runner.invoke(predict, ["--help"])
+        assert result.exit_code == 0
+        assert "--model" in result.output
+        assert "--text" in result.output
+        assert "--csv" in result.output
+
+    def test_single_prediction(self, runner, sample_text_csv, tmp_path):
+        from edge_train.trainer import train_text_classifier
+
+        model_path = train_text_classifier(
+            sample_text_csv, output_dir=str(tmp_path / "model"), epochs=2
+        )
+
+        result = runner.invoke(predict, ["-m", str(model_path), "-t", "hello world"])
+        assert result.exit_code == 0, result.output
+        assert "Predicted:" in result.output
+
+    def test_batch_csv_prediction(self, runner, sample_text_csv, tmp_path):
+        from edge_train.trainer import train_text_classifier
+
+        model_path = train_text_classifier(
+            sample_text_csv, output_dir=str(tmp_path / "model"), epochs=2
+        )
+
+        out_csv = tmp_path / "preds.csv"
+        result = runner.invoke(
+            predict,
+            ["-m", str(model_path), "-c", sample_text_csv, "-o", str(out_csv)],
+        )
+        assert result.exit_code == 0, result.output
+        assert out_csv.exists()
+
+    def test_missing_model(self, runner):
+        result = runner.invoke(predict, ["-m", "/nonexistent", "-t", "hello"])
+        assert result.exit_code != 0
+
+    def test_no_input_raises(self, runner, sample_text_csv, tmp_path):
+        from edge_train.trainer import train_text_classifier
+
+        model_path = train_text_classifier(
+            sample_text_csv, output_dir=str(tmp_path / "model"), epochs=2
+        )
+        result = runner.invoke(predict, ["-m", str(model_path)])
+        assert result.exit_code != 0
+        assert "Error" in result.output
+
+
+class TestMonitorRetrain:
+    def test_retrain_no_log_file(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv(
+            "EDGE_PREDICTION_LOG_PATH", str(tmp_path / "nonexistent.jsonl")
+        )
+        result = runner.invoke(monitor, ["--retrain", "--threshold", "0.80"])
+        assert result.exit_code == 0
+        assert "No prediction log" in result.output
+
+    def test_retrain_no_labeled_entries(self, runner, tmp_path, monkeypatch):
+        log_path = tmp_path / "preds.jsonl"
+        log_path.write_text(
+            '{"text":"hello","predicted_label":"greeting","confidence":0.9,"all_probs":{"greeting":0.9,"question":0.1},"timestamp":"2026-01-01T00:00:00Z"}\n'
+        )
+        monkeypatch.setenv("EDGE_PREDICTION_LOG_PATH", str(log_path))
+
+        result = runner.invoke(monitor, ["--retrain", "--threshold", "0.80"])
+        assert result.exit_code == 0
+        assert "No labeled entries" in result.output
+
+    def test_retrain_below_threshold_needs_dataset(self, runner, tmp_path, monkeypatch):
+        log_path = tmp_path / "preds.jsonl"
+        # 6/10 correct = 60% accuracy, below 0.80 threshold
+        lines = []
+        for i in range(10):
+            correct = i < 6
+            lines.append(
+                '{"text":"text%d","predicted_label":"A","confidence":0.7,"all_probs":{"A":0.7,"B":0.3},"timestamp":"2026-01-01T00:00:%02dZ","ground_truth":"%s"}\n'
+                % (i, i, "A" if correct else "B")
+            )
+        log_path.write_text("".join(lines))
+        monkeypatch.setenv("EDGE_PREDICTION_LOG_PATH", str(log_path))
+
+        result = runner.invoke(monitor, ["--retrain", "--threshold", "0.80"])
+        assert result.exit_code != 0
+        assert "Current accuracy" in result.output
+        assert "below threshold" in result.output.lower()
+        assert "dataset" in result.output.lower()

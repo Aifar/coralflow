@@ -54,6 +54,13 @@ class TrainConfig:
     training_timeout_min: int = 30
     output_dir: str = "./model_output"
     local_epochs: int = 10
+    retrain_accuracy_threshold: float = 0.85
+    retrain_min_samples: int = 10
+    prediction_log_path: str = field(
+        default_factory=lambda: os.environ.get(
+            "EDGE_PREDICTION_LOG_PATH", "./prediction_log.jsonl"
+        )
+    )
 
 
 from edge_train.edge.config import EdgeConfig

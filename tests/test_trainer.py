@@ -105,3 +105,19 @@ class TestTrainTextClassifier:
 
         meta = json.loads((out / "model_meta.json").read_text())
         assert len(meta["classes"]) == 2
+
+    def test_model_meta_loadable_by_inference(self, tmp_path):
+        from edge_train.inference import TextClassifier
+
+        csv_path = tmp_path / "data.csv"
+        csv_path.write_text("text,label\nhello world,greeting\nhow are you,question\n")
+
+        out = train_text_classifier(
+            str(csv_path), output_dir=str(tmp_path / "model"), epochs=2
+        )
+
+        clf = TextClassifier(str(out))
+        assert clf.num_classes == 2
+        assert clf.class_names == ["greeting", "question"]
+        label, conf = clf.predict("hello world")
+        assert label in ("greeting", "question")

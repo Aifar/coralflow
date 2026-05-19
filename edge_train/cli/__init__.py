@@ -8,6 +8,7 @@ from edge_train.cli.validate import validate
 from edge_train.cli.deploy import deploy
 from edge_train.cli.monitor import monitor
 from edge_train.cli.cost import cost
+from edge_train.cli.predict import predict
 
 
 @click.group()
@@ -25,6 +26,7 @@ main.add_command(validate)
 main.add_command(deploy)
 main.add_command(monitor)
 main.add_command(cost)
+main.add_command(predict)
 
 if __name__ == "__main__":
     main()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "edge-train"
-version = "0.2.1"
+version = "0.3.0"
 description = "TinyML continuous training agent — dataset in, model out, deploy, monitor, auto-retrain"
 readme = "README.md"
 requires-python = ">=3.10"

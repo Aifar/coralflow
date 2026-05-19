@@ -6,7 +6,7 @@ Guidance for Claude Code when working on CoralFlow / edge-train.
 
 CoralFlow — TinyML continuous training agent. Train, validate, deploy, monitor, and auto-retrain ML models on edge devices from the CLI, zero GPU needed.
 
-- **Version**: 0.2.0 (Week 2: Device SDK & OTA deploy complete)
+- **Version**: 0.3.0 (Week 3: Local inference + auto-retrain loop)
 - **License**: MIT
 
 ## Architecture
@@ -16,10 +16,12 @@ CoralFlow — TinyML continuous training agent. Train, validate, deploy, monitor
 edge_train/
 ├── __init__.py           # version
 ├── config.py             # GCPConfig, ArizeConfig, TrainConfig, EdgeConfig
-├── cli/                  # Click CLI — 6 commands
-│   ├── __init__.py, init.py, train.py, validate.py, deploy.py, monitor.py, cost.py
+├── cli/                  # Click CLI — 7 commands
+│   ├── __init__.py, init.py, train.py, validate.py, deploy.py, monitor.py, cost.py, predict.py
 ├── cloud/                # Vertex AI AutoML integration (text/image/table)
 ├── datasets/             # Built-in datasets (urgent, expense) + modality detection
+├── inference/            # Local inference — TextClassifier loads SavedModel + model_meta.json
+├── trainer/              # Local training — TF Keras text classifier
 ├── validation/           # TFLite conversion, size/latency constraints
 └── edge/                 # Device SDK (Week 2)
     ├── config.py, registry.py, model.py, deploy.py, transport/
@@ -28,11 +30,24 @@ edge_train/
 
 ### Key decisions
 - Flat module layout under `edge_train/`
-- Click CLI framework, 6 commands: init, train, validate, deploy, monitor, cost
-- Vertex AI AutoML for cloud training
+- Click CLI framework, 7 commands: init, train, validate, deploy, monitor, cost, predict
+- Vertex AI AutoML for cloud training (`--cloud` flag), local TF Keras by default
+- Local inference uses SavedModel (not TFLite) to keep TextVectorization in-graph
+- Phoenix OTEL spans created per prediction with OpenInference conventions
+- Prediction log (JSON lines) enables retrain loop — append `ground_truth` to trigger retraining
 - Device SDK supports HTTP transport with aiohttp, extensible for MQTT/SSH/BLE
 - Local device registry backed by JSON file
 - Model packaging: .tflite + manifest.json (SHA-256, version, modality)
+
+### Predict/Retrain flow
+```
+edge-train predict --model <path> --text "..."      # single prediction
+edge-train predict --model <path> --csv data.csv    # batch prediction
+edge-train monitor --retrain --dataset original.csv # check accuracy, retrain if needed
+```
+Predictions are logged to `prediction_log.jsonl` (configurable via `EDGE_PREDICTION_LOG_PATH`).
+Phoenix OTEL spans are created per prediction when Phoenix is configured.
+Add `"ground_truth"` fields to log entries to enable retraining.
 
 ## Development
 
@@ -78,6 +93,7 @@ All config reads from environment variables:
   - `PHOENIX_PROJECT_NAME` (optional, default: `edge-train`) — project name in Phoenix dashboard
   - `PHOENIX_COLLECTOR_ENDPOINT` defaults to `https://app.phoenix.arize.com/v1/traces`
 - `EDGE_REGISTRY_PATH` — device registry file path
+- `EDGE_PREDICTION_LOG_PATH` — prediction log file path (default: `./prediction_log.jsonl`)
 
 ### Versioning
 Bump version in `edge_train/__init__.py` and `pyproject.toml`.
