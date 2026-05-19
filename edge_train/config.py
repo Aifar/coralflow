@@ -52,6 +52,8 @@ class TrainConfig:
     inference_ms: int = 50
     accuracy_loss_pct: float = 2.0
     training_timeout_min: int = 30
+    output_dir: str = "./model_output"
+    local_epochs: int = 10
 
 
 from edge_train.edge.config import EdgeConfig

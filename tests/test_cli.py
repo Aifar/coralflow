@@ -12,6 +12,7 @@ from edge_train.cli.cost import cost
 from edge_train.cli.validate import validate
 from edge_train.cli.monitor import monitor
 from edge_train.cli.deploy import deploy
+from edge_train.cli.train import train
 
 
 @pytest.fixture
@@ -84,6 +85,37 @@ class TestValidateCommand:
         result = runner.invoke(validate, [])
         assert result.exit_code != 0
         assert "Error" in result.output or "--model" in result.output
+
+
+class TestTrainCommand:
+    def test_train_help(self, runner):
+        result = runner.invoke(train, ["--help"])
+        assert result.exit_code == 0
+        assert "--dataset" in result.output
+        assert "--cloud" in result.output
+        assert "--epochs" in result.output
+
+    def test_local_train_success(self, runner, sample_text_csv, tmp_path):
+        out = tmp_path / "model"
+        result = runner.invoke(
+            train, ["-d", sample_text_csv, "-o", str(out), "--epochs", "2"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "Model saved to:" in result.output
+        assert out.exists()
+
+    def test_local_train_unsupported_modality(self, runner, tmp_path):
+        out = tmp_path / "model"
+        result = runner.invoke(
+            train, ["-d", "/tmp/nonexistent.csv", "--type", "image", "-o", str(out)]
+        )
+        assert result.exit_code != 0
+        assert "not yet supported" in result.output.lower()
+
+    def test_cloud_requires_gcp(self, runner, sample_text_csv, clear_env):
+        result = runner.invoke(train, ["-d", sample_text_csv, "--cloud"])
+        assert result.exit_code != 0
+        assert "GCP not configured" in result.output
 
 
 class TestMonitorCommand:

@@ -47,6 +47,14 @@ uv pip install -e ".[dev]"
 - Never include `Co-Authored-By` trailers in commit messages
 - Use conventional commit prefixes: `feat:`, `fix:`, `style:`, `test:`, `chore:`
 
+### Before pushing
+**Always run locally first — never skip this.** CI failures waste time.
+```bash
+source .venv/bin/activate && black --check --target-version py310 edge_train/ tests/
+source .venv/bin/activate && python -m pytest tests/ -v
+```
+Both must pass before `git push`. If black check fails, run `black --target-version py310 edge_train/ tests/` to auto-fix.
+
 ### Run all tests
 ```bash
 source .venv/bin/activate && python -m pytest tests/ -v

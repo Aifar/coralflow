@@ -1,4 +1,4 @@
-"""train command — submit a training job to Vertex AI AutoML."""
+"""train command — local training by default, Vertex AI AutoML with --cloud."""
 
 import sys
 import time
@@ -6,7 +6,6 @@ import time
 import click
 
 from edge_train.config import load_config
-from edge_train.cloud import submit_automl_job, poll_job, Modality
 
 
 @click.command()
@@ -19,13 +18,54 @@ from edge_train.cloud import submit_automl_job, poll_job, Modality
     help="Override modality auto-detection",
 )
 @click.option("--target", default=None, help="Target column name (for CSV)")
-@click.option("--timeout", default=30, help="Max training wait time in minutes")
-def train(dataset: str, modality: str | None, target: str | None, timeout: int):
-    """Train a model using Vertex AI AutoML.
+@click.option(
+    "--timeout", default=30, help="Max training wait time in minutes (cloud only)"
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Output directory for trained model (default: ./model_output)",
+)
+@click.option("--epochs", default=None, type=int, help="Training epochs (local only)")
+@click.option(
+    "--cloud",
+    is_flag=True,
+    default=False,
+    help="Use Vertex AI AutoML instead of local training",
+)
+def train(
+    dataset: str,
+    modality: str | None,
+    target: str | None,
+    timeout: int,
+    output: str | None,
+    epochs: int | None,
+    cloud: bool,
+):
+    """Train a model — local by default, or Vertex AI AutoML with --cloud.
 
-    The modality is auto-detected from the dataset unless --type is specified.
+    Local training works entirely offline with no API keys.
+    Currently supports text classification; image and table coming soon.
     """
     gcp, _, train_cfg, _ = load_config()
+
+    from edge_train.datasets import infer_modality_from_path
+
+    resolved_modality = modality or infer_modality_from_path(dataset)
+    out_dir = output or train_cfg.output_dir
+    num_epochs = epochs or train_cfg.local_epochs
+
+    if cloud:
+        _train_cloud(dataset, resolved_modality, target, timeout, gcp, train_cfg)
+    else:
+        _train_local(dataset, resolved_modality, target, out_dir, num_epochs)
+
+
+def _train_cloud(dataset, modality, target, timeout, gcp, train_cfg):
+    """Existing Vertex AI AutoML path."""
+    from edge_train.cloud import Modality, submit_automl_job, poll_job
+
     if not gcp.is_valid():
         click.echo(
             "Error: GCP not configured. Set GCP_PROJECT and GCP_STAGING_BUCKET env vars.",
@@ -33,12 +73,8 @@ def train(dataset: str, modality: str | None, target: str | None, timeout: int):
         )
         sys.exit(1)
 
-    from edge_train.datasets import infer_modality_from_path
-
-    resolved_modality = (
-        Modality(modality) if modality else Modality(infer_modality_from_path(dataset))
-    )
-    click.echo(f"  Modality: {resolved_modality.value}")
+    resolved = Modality(modality) if isinstance(modality, str) else Modality(modality)
+    click.echo(f"  Modality: {resolved.value}")
     click.echo(f"  Dataset: {dataset}")
     click.echo(f"  GCP Project: {gcp.project_id}")
     click.echo("  Submitting training job to Vertex AI AutoML...")
@@ -48,7 +84,7 @@ def train(dataset: str, modality: str | None, target: str | None, timeout: int):
             project=gcp.project_id,
             location=gcp.location,
             dataset_path=dataset,
-            modality=resolved_modality,
+            modality=resolved,
             target_column=target,
             staging_bucket=gcp.staging_bucket,
         )
@@ -77,3 +113,36 @@ def train(dataset: str, modality: str | None, target: str | None, timeout: int):
 
     click.echo(f"  Model saved to: {result.get('model_path', 'unknown')}")
     click.echo(f"  Evaluation accuracy: {result.get('accuracy', '?')}")
+
+
+def _train_local(dataset, modality, target, output_dir, epochs):
+    """Local training path — no cloud required."""
+    click.echo(f"  Modality: {modality}")
+    click.echo(f"  Dataset: {dataset}")
+    click.echo("  Training locally...")
+
+    if modality == "text":
+        from edge_train.trainer import train_text_classifier
+
+        try:
+            model_path = train_text_classifier(
+                dataset_path=dataset,
+                target_column=target,
+                output_dir=output_dir,
+                epochs=epochs,
+            )
+        except Exception as e:
+            click.echo(f"  Training failed: {e}", err=True)
+            sys.exit(1)
+
+        click.echo(f"  Model saved to: {model_path}")
+        click.echo(
+            f"  Next: edge-train validate --model {model_path} --output model.tflite"
+        )
+    else:
+        click.echo(
+            f"  Local training for '{modality}' is not yet supported. "
+            f"Use --cloud for Vertex AI AutoML.",
+            err=True,
+        )
+        sys.exit(1)

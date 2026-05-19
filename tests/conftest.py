@@ -21,6 +21,17 @@ def sample_csv(temp_dir):
 
 
 @pytest.fixture
+def sample_text_csv(temp_dir):
+    path = temp_dir / "train.csv"
+    path.write_text(
+        "text,label\nhello world,greeting\nhow are you,question\n"
+        "goodbye,farewell\nsee you later,farewell\n",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+@pytest.fixture
 def clear_env():
     """Remove edge-train env vars before each test."""
     for key in list(os.environ):
