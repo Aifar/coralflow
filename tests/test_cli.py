@@ -38,7 +38,7 @@ class TestMainCLI:
     def test_help(self, runner):
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        assert "edge-train" in result.output
+        assert "coralflow" in result.output
 
     def test_no_command_shows_help(self, runner):
         result = runner.invoke(main, [])

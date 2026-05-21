@@ -9,17 +9,19 @@ from edge_train.cli.deploy import deploy
 from edge_train.cli.monitor import monitor
 from edge_train.cli.cost import cost
 from edge_train.cli.predict import predict
+from edge_train.cli.agent import agent
 
 
 @click.group()
 def main():
-    """edge-train: TinyML continuous training agent.
+    """coralflow: TinyML continuous training agent.
 
     Train, deploy, and monitor tiny ML models on edge devices —
     all from the command line, zero GPU needed.
     """
 
 
+main.add_command(agent)
 main.add_command(init)
 main.add_command(train)
 main.add_command(validate)

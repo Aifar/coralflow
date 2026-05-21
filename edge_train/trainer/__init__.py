@@ -88,6 +88,7 @@ def train_text_classifier(
     target_column: str | None = None,
     output_dir: str = "./model_output",
     epochs: int = 10,
+    callbacks: list | None = None,
 ) -> Path:
     """Train a small text classifier locally and export as SavedModel.
 
@@ -129,7 +130,14 @@ def train_text_classifier(
         metrics=["accuracy"],
     )
 
-    model.fit(tokenized, y, epochs=epochs, validation_split=0.2, verbose=0)
+    model.fit(
+        tokenized,
+        y,
+        epochs=epochs,
+        validation_split=0.2,
+        verbose=0,
+        callbacks=callbacks or [],
+    )
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)

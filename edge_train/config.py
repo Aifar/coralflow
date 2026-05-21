@@ -63,6 +63,26 @@ class TrainConfig:
     )
 
 
+@dataclass
+class LLMConfig:
+    """LLM API configuration for the coralflow agent."""
+
+    endpoint: str = field(
+        default_factory=lambda: os.environ.get(
+            "CORALFLOW_LLM_ENDPOINT", "https://api.openai.com/v1"
+        )
+    )
+    api_key: str = field(
+        default_factory=lambda: os.environ.get("CORALFLOW_LLM_API_KEY", "")
+    )
+    model: str = field(
+        default_factory=lambda: os.environ.get("CORALFLOW_LLM_MODEL", "gpt-4o")
+    )
+
+    def is_valid(self) -> bool:
+        return bool(self.api_key)
+
+
 from edge_train.edge.config import EdgeConfig
 
 

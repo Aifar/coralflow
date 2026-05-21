@@ -1,0 +1,340 @@
+"""Tests for coralflow agent module."""
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+
+class TestAgentState:
+    def test_default_state(self):
+        from edge_train.agent import AgentState
+
+        state = AgentState()
+        assert state.dataset_path == ""
+        assert state.model_path is None
+        assert state.task_type == ""
+        assert state.deployment_target is None
+        assert state.created_at != ""
+
+    def test_save_and_load(self, tmp_path):
+        from edge_train.agent import AgentState
+
+        state_file = tmp_path / "state.json"
+        state = AgentState(
+            dataset_path="/data/test.csv",
+            model_path="/models/test",
+            task_type="text-classification",
+            deployment_target="10.0.0.1",
+            last_step="train",
+            conversation_summary="User trained a model.",
+        )
+        state.save(str(state_file))
+        assert state_file.exists()
+
+        loaded = AgentState.load(str(state_file))
+        assert loaded.dataset_path == "/data/test.csv"
+        assert loaded.model_path == "/models/test"
+        assert loaded.task_type == "text-classification"
+        assert loaded.deployment_target == "10.0.0.1"
+        assert loaded.last_step == "train"
+        assert loaded.conversation_summary == "User trained a model."
+
+    def test_load_nonexistent_returns_default(self, tmp_path):
+        from edge_train.agent import AgentState
+
+        state = AgentState.load(str(tmp_path / "nonexistent.json"))
+        assert state.dataset_path == ""
+
+    def test_roundtrip_preserves_fields(self, tmp_path):
+        from edge_train.agent import AgentState
+
+        state_file = tmp_path / "roundtrip.json"
+        state = AgentState(
+            dataset_path="builtin:urgent",
+            model_path="./model_output/urgent",
+            task_type="text",
+            last_step="deploy",
+        )
+        state.save(str(state_file))
+
+        loaded = AgentState.load(str(state_file))
+        assert loaded.dataset_path == state.dataset_path
+        assert loaded.model_path == state.model_path
+        assert loaded.task_type == state.task_type
+        assert loaded.last_step == state.last_step
+
+
+class TestDatasetScanner:
+    def test_finds_csv_files(self, tmp_path):
+        from edge_train.agent import DatasetScanner
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        csv_file = data_dir / "test.csv"
+        csv_file.write_text("text,label\nhello,greeting\nworld,question\n")
+
+        datasets = DatasetScanner.scan([str(data_dir)])
+        assert any(d["name"] == "test" for d in datasets)
+
+    def test_includes_builtin(self):
+        from edge_train.agent import DatasetScanner
+
+        datasets = DatasetScanner.scan(["/nonexistent/path"])
+        builtin_names = {d["name"] for d in datasets if d["source"] == "built-in"}
+        assert "urgent" in builtin_names
+        assert "expense" in builtin_names
+
+    def test_excludes_non_csv(self, tmp_path):
+        from edge_train.agent import DatasetScanner
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "notes.txt").write_text("hello")
+
+        datasets = DatasetScanner.scan([str(data_dir)])
+        names = {d["name"] for d in datasets}
+        assert "notes" not in names
+
+    def test_returns_modality_and_rows(self, tmp_path):
+        from edge_train.agent import DatasetScanner
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        csv_file = data_dir / "sample.csv"
+        csv_file.write_text("text,label\nhello,greeting\nworld,question\n")
+
+        datasets = DatasetScanner.scan([str(data_dir)])
+        match = [d for d in datasets if d["name"] == "sample"]
+        assert len(match) == 1
+        assert match[0]["modality"] in ("text", "unknown")
+        assert match[0]["rows"] == 2
+
+
+class TestRecommender:
+    def test_recommends_local_for_small_text(self):
+        from edge_train.agent import Recommender
+
+        rec = Recommender.recommend(
+            {"rows": 500, "classes": ["A", "B"], "modality": "text"}
+        )
+        assert rec["method"] == "local"
+        assert rec["epochs"] is not None
+
+    def test_recommends_cloud_for_large_dataset(self):
+        from edge_train.agent import Recommender
+
+        rec = Recommender.recommend(
+            {"rows": 50000, "classes": ["A", "B"], "modality": "text"}
+        )
+        assert rec["method"] == "cloud"
+
+    def test_recommends_cloud_for_image(self):
+        from edge_train.agent import Recommender
+
+        rec = Recommender.recommend(
+            {"rows": 100, "classes": ["A", "B"], "modality": "image"}
+        )
+        assert rec["method"] == "cloud"
+
+    def test_recommends_cloud_for_table(self):
+        from edge_train.agent import Recommender
+
+        rec = Recommender.recommend(
+            {"rows": 200, "classes": ["X"], "modality": "table"}
+        )
+        assert rec["method"] == "cloud"
+
+    def test_small_dataset_gets_more_epochs(self):
+        from edge_train.agent import Recommender
+
+        rec_small = Recommender.recommend(
+            {"rows": 100, "classes": ["A"], "modality": "text"}
+        )
+        rec_large = Recommender.recommend(
+            {"rows": 3000, "classes": ["A"], "modality": "text"}
+        )
+        assert rec_small["epochs"] >= rec_large["epochs"]
+
+
+class TestLLMConfig:
+    def test_from_env_defaults(self, clear_env):
+        from edge_train.agent.llm import LLMConfig
+
+        config = LLMConfig.from_env()
+        assert config.endpoint == "https://api.openai.com/v1"
+        assert config.api_key == ""
+        assert config.model == "gpt-4o"
+        assert not config.is_valid()
+
+    def test_from_env_with_key(self, monkeypatch):
+        from edge_train.agent.llm import LLMConfig
+
+        monkeypatch.setenv("CORALFLOW_LLM_API_KEY", "sk-test")
+        config = LLMConfig.from_env()
+        assert config.is_valid()
+
+    def test_from_env_custom_values(self, monkeypatch):
+        from edge_train.agent.llm import LLMConfig
+
+        monkeypatch.setenv("CORALFLOW_LLM_API_KEY", "sk-custom")
+        monkeypatch.setenv("CORALFLOW_LLM_ENDPOINT", "https://custom.api.com/v1")
+        monkeypatch.setenv("CORALFLOW_LLM_MODEL", "gpt-4o-mini")
+
+        config = LLMConfig.from_env()
+        assert config.endpoint == "https://custom.api.com/v1"
+        assert config.model == "gpt-4o-mini"
+        assert config.is_valid()
+
+
+class TestCLIAgent:
+    def test_help(self):
+        from edge_train.cli.agent import agent
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+        result = runner.invoke(agent, ["--help"])
+        assert result.exit_code == 0
+        assert "LLM-powered" in result.output
+        assert "--model" in result.output
+        assert "--endpoint" in result.output
+        assert "--resume" in result.output
+
+    def test_exits_without_api_key(self):
+        from edge_train.cli.agent import agent
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+        result = runner.invoke(agent, [])
+        assert result.exit_code == 1
+        assert "CORALFLOW_LLM_API_KEY" in result.output
+
+    def test_resume_flag_accepted(self):
+        from edge_train.cli.agent import agent
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+        result = runner.invoke(agent, ["--resume", "--help"])
+        assert result.exit_code == 0
+        assert "--resume" in result.output
+
+
+class TestToolSchemas:
+    def test_all_tools_have_name_and_description(self):
+        from edge_train.agent.tools import TOOLS
+
+        for tool in TOOLS:
+            assert tool["type"] == "function"
+            func = tool["function"]
+            assert "name" in func
+            assert "description" in func
+            assert "parameters" in func
+            params = func["parameters"]
+            assert params["type"] == "object"
+            assert "properties" in params
+
+    def test_required_tools_exist(self):
+        from edge_train.agent.tools import TOOLS
+
+        names = {t["function"]["name"] for t in TOOLS}
+        required = {
+            "scan_datasets",
+            "analyze_dataset",
+            "assess_resources",
+            "validate_dataset",
+            "recommend_datasets",
+            "train_model",
+            "validate_model",
+            "deploy_model",
+            "predict",
+            "check_monitoring",
+            "check_retrain",
+            "run_shell",
+            "get_status",
+        }
+        assert required <= names
+
+    def test_tool_schemas_are_valid_json(self):
+        from edge_train.agent.tools import TOOLS
+
+        # Must be serializable
+        serialized = json.dumps(TOOLS)
+        assert len(serialized) > 0
+        parsed = json.loads(serialized)
+        assert len(parsed) == len(TOOLS)
+
+
+class TestValidateDataset:
+    def test_missing_file(self):
+        from edge_train.agent.validate_dataset import validate_dataset
+
+        result = validate_dataset("/nonexistent/dataset.csv")
+        assert "not found" in result
+
+    def test_builtin_skipped(self):
+        from edge_train.agent.validate_dataset import validate_dataset
+
+        # Should handle builtin gracefully (it passes through to the file reader check)
+        result = validate_dataset("builtin:urgent")
+        assert "not found" in result  # builtin: is not a real path
+
+
+class TestRecommendDatasets:
+    def test_empty_task_returns_prompt(self):
+        from edge_train.agent.recommend import recommend_datasets
+
+        result = recommend_datasets("")
+        assert "task description" in result.lower()
+
+    def test_fallback_without_llm(self):
+        from edge_train.agent.recommend import recommend_datasets
+
+        result = recommend_datasets("spam detection")
+        assert "HuggingFace" in result or "Kaggle" in result or "UCI" in result
+
+
+class TestResourceAssessment:
+    def test_returns_report_with_cpu_and_ram(self):
+        from edge_train.agent.resources import assess_resources
+
+        result = assess_resources()
+        assert "CPU:" in result
+        assert "RAM:" in result
+        assert "Disk:" in result
+        assert "TensorFlow:" in result
+        assert "Verdict:" in result
+
+    def test_nonexistent_dataset_is_skipped(self):
+        from edge_train.agent.resources import assess_resources
+
+        result = assess_resources("/nonexistent/dataset.csv")
+        assert "Verdict:" in result
+
+    def test_verdict_is_either_viable_or_insufficient(self):
+        from edge_train.agent.resources import assess_resources
+
+        result = assess_resources()
+        assert ("viable" in result) or ("insufficient" in result)
+
+
+class TestScanModels:
+    def test_returns_list(self):
+        from edge_train.agent import scan_models
+
+        models = scan_models(["/nonexistent/path"])
+        assert isinstance(models, list)
+
+    def test_finds_saved_models(self, tmp_path):
+        from edge_train.agent import scan_models
+
+        model_dir = tmp_path / "models" / "test_model"
+        model_dir.mkdir(parents=True)
+        (model_dir / "saved_model.pb").write_text("fake pb")
+        (model_dir / "model_meta.json").write_text(json.dumps({"classes": ["A", "B"]}))
+
+        models = scan_models([str(tmp_path / "models")])
+        assert len(models) == 1
+        assert models[0]["name"] == "test_model"
+        assert models[0]["classes"] == ["A", "B"]
