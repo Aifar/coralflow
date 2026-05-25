@@ -7,9 +7,8 @@ import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import click
-
 from edge_train.agent.tools import TOOLS, execute_tool
+from edge_train.agent.ui import CoralFlowUI
 
 if TYPE_CHECKING:
     from edge_train.agent.llm import LLMClient
@@ -28,24 +27,38 @@ Capabilities:
 - Check prediction accuracy and trigger retraining when needed
 
 Guidelines:
-- Before any training, assess local resources and explain the recommendation
-- If local resources are sufficient, offer both local and cloud options
-- If local resources are insufficient, recommend cloud with clear rationale
+- **Training flow is mandatory: assess → choose → train**
+- When the user asks to train, you MUST first call `assess_resources` with the dataset path
+- After assessment, you MUST present the options and ask the user to choose (1 or 2)
+- Wait for the user's choice before calling `train_model` or suggesting cloud
+- If local resources are insufficient, explain why and recommend cloud
 - When the user asks to train, first scan for datasets and present options
 - If no local dataset matches, recommend public datasets from the web
 - Always validate a dataset before training — flag quality issues early
 - After training, suggest validation and deployment
 - Show key results (accuracy, model size, latency) after each step
 - If Phoenix is configured, suggest monitoring after deployment
-- Be concise — users are in the terminal"""
+- Be concise — users are in the terminal
+- **ALWAYS respond in English** — all responses, explanations, and tool outputs must be in English, regardless of the user's language
+
+Format all responses in Markdown:
+- Use **bold** for key values (accuracy, model names, sizes)
+- Use `backticks` for commands, file paths, and code
+- Use bullet lists for options and recommendations
+- Use ### headers for sections when appropriate
+- Keep it concise — terminal users don't need essays"""
 
 
-def run_agent_loop(llm: "LLMClient", state, scan_result: str = ""):
+def run_agent_loop(
+    llm: "LLMClient", state, scan_result: str = "", ctx_summary: str = ""
+):
     """Main REPL: prompt → LLM → tools → response → repeat.
 
     Slash commands are parsed into tool_calls, executed, and the result
     is sent to the LLM for a response — keeping conversation context coherent.
     """
+    ui = CoralFlowUI()
+
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT},
     ]
@@ -61,16 +74,20 @@ def run_agent_loop(llm: "LLMClient", state, scan_result: str = ""):
     if scan_result:
         messages.append({"role": "system", "content": f"Startup scan:\n{scan_result}"})
 
-    click.echo()
-    click.echo("Type /help for commands, /exit to quit.")
-    click.echo()
+    # Banner
+    banner = (
+        "TinyML continuous training — LLM-powered\n\n"
+        + (f"{ctx_summary}\n\n" if ctx_summary else "")
+        + "Type `/help` for commands, `/exit` to quit."
+    )
+    ui.panel(banner, title="CoralFlow Agent")
 
     while True:
         try:
-            user_input = click.prompt("coralflow", prompt_suffix="> ").strip()
+            user_input = ui.prompt("coralflow")
         except (EOFError, KeyboardInterrupt):
-            click.echo("\nExiting...")
-            _save_and_exit(state, messages)
+            ui.info("\nExiting...")
+            _save_and_exit(state, messages, ui)
             return
 
         if not user_input:
@@ -79,14 +96,14 @@ def run_agent_loop(llm: "LLMClient", state, scan_result: str = ""):
         # ── Slash commands ──────────────────────────────────────────
         if user_input.startswith("/"):
             if user_input in ("/exit", "/quit"):
-                _save_and_exit(state, messages)
+                _save_and_exit(state, messages, ui)
                 return
 
             if user_input == "/help":
-                _print_help()
+                _print_help(ui)
                 continue
 
-            tool_call_msg, result_text = _handle_slash_command(user_input, llm)
+            tool_call_msg, result_text = _handle_slash_command(user_input, llm, ui)
             if tool_call_msg is None:
                 continue  # unhandled
 
@@ -100,12 +117,15 @@ def run_agent_loop(llm: "LLMClient", state, scan_result: str = ""):
                 }
             )
 
+            ui.separator()
+            ui.markdown(result_text)
+
             # Send to LLM for response
             resp = llm.chat(messages, TOOLS)
             if resp.content:
                 messages.append({"role": "assistant", "content": resp.content})
-                click.echo()
-                click.echo(resp.content)
+                ui.markdown(resp.content)
+                ui.separator()
             continue
 
         # ── Normal text ──────────────────────────────────────────────
@@ -116,7 +136,7 @@ def run_agent_loop(llm: "LLMClient", state, scan_result: str = ""):
         # Tool call loop
         while resp.tool_calls:
             for tc in resp.tool_calls:
-                click.echo(f"  ⚙ {tc.name}...")
+                ui.tool_start(tc.name)
                 result = execute_tool(tc.name, tc.arguments, llm=llm)
 
                 messages.append(
@@ -141,12 +161,16 @@ def run_agent_loop(llm: "LLMClient", state, scan_result: str = ""):
                     {"role": "tool", "tool_call_id": tc.id, "content": result}
                 )
 
+                ui.separator()
+                ui.markdown(result)
+                ui.separator()
+
             resp = llm.chat(messages, TOOLS)
 
         if resp.content:
             messages.append({"role": "assistant", "content": resp.content})
-            click.echo()
-            click.echo(resp.content)
+            ui.markdown(resp.content)
+            ui.separator()
 
         # Keep conversation bounded
         if len(messages) > 40:
@@ -160,12 +184,12 @@ def run_agent_loop(llm: "LLMClient", state, scan_result: str = ""):
             )
 
 
-def _handle_slash_command(user_input: str, llm: "LLMClient") -> tuple[dict | None, str]:
+def _handle_slash_command(
+    user_input: str, llm: "LLMClient", ui: CoralFlowUI
+) -> tuple[dict | None, str]:
     """Parse a slash command into a tool_call message + execute it. Returns (tool_call_msg, result)."""
-    # Strip the leading /
     rest = user_input[1:].strip()
 
-    # Split into command name and arguments
     parts = shlex.split(rest)
     if not parts:
         return None, ""
@@ -173,7 +197,6 @@ def _handle_slash_command(user_input: str, llm: "LLMClient") -> tuple[dict | Non
     cmd = parts[0].lower()
     args_list = parts[1:]
 
-    # Map slash commands to tool calls
     tool_name = None
     tool_args: dict = {}
 
@@ -184,11 +207,10 @@ def _handle_slash_command(user_input: str, llm: "LLMClient") -> tuple[dict | Non
     elif cmd == "status":
         tool_name = "get_status"
     elif cmd in ("train", "predict", "deploy", "monitor", "validate", "cost", "init"):
-        # Rebuild the coralflow command
         tool_name = "run_shell"
         tool_args["command"] = f"{cmd} {' '.join(args_list)}"
     else:
-        click.echo(f"  Unknown command: /{cmd}. Type /help for available commands.")
+        ui.error(f"Unknown command: /{cmd}. Type /help for available commands.")
         return None, ""
 
     if tool_name == "scan_models":
@@ -229,30 +251,30 @@ def _handle_slash_command(user_input: str, llm: "LLMClient") -> tuple[dict | Non
     return tool_call_msg, result
 
 
-def _print_help():
-    click.echo("""
-Available slash commands:
-  /train <args>    — Train a model (e.g. /train -d data.csv -o ./out)
-  /predict <args>  — Run predictions
-  /deploy <args>   — Deploy a model to an edge device
-  /validate <args> — Validate a model (TFLite conversion)
-  /monitor <args>  — Check Phoenix monitoring status
-  /cost <args>     — Estimate cloud training cost
-  /init <args>     — Download built-in datasets
-  /datasets        — List discovered datasets
-  /models          — List trained models
-  /status          — Show agent state summary
-  /help            — Show this help
-  /exit, /quit     — Save state and exit
+def _print_help(ui: CoralFlowUI):
+    ui.panel(
+        """Available slash commands:
+- `/train <args>` — Train a model (e.g. `/train -d data.csv -o ./out`)
+- `/predict <args>` — Run predictions
+- `/deploy <args>` — Deploy a model to an edge device
+- `/validate <args>` — Validate a model (TFLite conversion)
+- `/monitor <args>` — Check Phoenix monitoring status
+- `/cost <args>` — Estimate cloud training cost
+- `/init <args>` — Download built-in datasets
+- `/datasets` — List discovered datasets
+- `/models` — List trained models
+- `/status` — Show agent state summary
+- `/help` — Show this help
+- `/exit`, `/quit` — Save state and exit
 
 You can also just describe what you want to do in natural language
-and the agent will figure out the right commands to run.
-""")
+and the agent will figure out the right commands to run.""",
+        title="CoralFlow Commands",
+    )
 
 
-def _save_and_exit(state, messages: list[dict]):
+def _save_and_exit(state, messages: list[dict], ui: CoralFlowUI):
     """Summarize conversation, save state, and exit."""
-    # Summarize the last few exchanges
     recent = [
         m
         for m in messages[-10:]
@@ -263,7 +285,7 @@ def _save_and_exit(state, messages: list[dict]):
         state.conversation_summary = summary[:500]
         state.last_step = "agent_session"
     state.save()
-    click.echo("State saved. Goodbye!")
+    ui.success("State saved. Goodbye!")
 
 
 def _trim_history(messages: list[dict]):

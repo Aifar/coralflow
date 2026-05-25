@@ -45,11 +45,11 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
     # Load agent state
     state = AgentState.load()
 
-    ctx_parts = [f"coralflow agent v0.4.0 — LLM: {config.model}"]
+    # Build context for the loop banner
+    ctx_parts = [f"LLM: {config.model}"]
     if config.endpoint != "https://api.openai.com/v1":
         ctx_parts.append(f"Endpoint: {config.endpoint}")
 
-    # Scan
     if not resume:
         datasets = DatasetScanner.scan()
         models = scan_models()
@@ -82,20 +82,12 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
     if state.dataset_path:
         ctx_parts.append(f"Last dataset: {state.dataset_path}")
 
-    # Print banner
-    click.echo()
-    click.echo("=" * 56)
-    click.echo("  CoralFlow Agent")
-    click.echo("  TinyML continuous training — LLM-powered")
-    click.echo("=" * 56)
-    for part in ctx_parts:
-        click.echo(f"  {part}")
-    click.echo()
+    ctx_summary = " | ".join(ctx_parts)
 
     # Create LLM client and enter REPL
     llm = LLMClient(config)
 
     try:
-        run_agent_loop(llm, state, scan_result)
+        run_agent_loop(llm, state, scan_result, ctx_summary)
     except KeyboardInterrupt:
         click.echo()

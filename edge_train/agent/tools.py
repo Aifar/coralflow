@@ -95,7 +95,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "train_model",
-            "description": "Train a text classifier locally with TensorFlow. Shows live epoch progress.",
+            "description": "Train a text classifier **locally** with TensorFlow. Only call this after the user has explicitly chosen local training (option 1). Shows live epoch progress.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -289,13 +289,13 @@ def _exec_scan_datasets() -> str:
     if not datasets:
         return "No datasets found. Use 'edge-train init download <name>' to get a built-in dataset, or provide a CSV file."
 
-    lines = [f"Found {len(datasets)} dataset(s):"]
+    lines = [f"Found **{len(datasets)}** dataset(s):"]
     for d in datasets:
         classes_str = ", ".join(d.get("classes", [])[:5])
         if len(d.get("classes", [])) > 5:
             classes_str += f" (+{len(d['classes']) - 5} more)"
         lines.append(
-            f"  • {d['name']} — {d['rows']} rows, {d.get('modality', '?')}, "
+            f"  • **{d['name']}** — {d['rows']} rows, {d.get('modality', '?')}, "
             f"[{classes_str}] ({d['source']})"
             + (f"\n    {d.get('description', '')}" if d.get("description") else "")
         )
@@ -343,10 +343,10 @@ def _exec_analyze_dataset(arguments: dict) -> str:
             sample_lines.append(f"  {r[text_col][:60]}")
 
     lines = [
-        f"Dataset: {p.name} ({len(rows)} rows, {len(headers)} columns)",
-        f"  Modality: text (from CSV)",
-        f"  Text column: {text_col or '?'}",
-        f"  Label column: {label_col or '?'}",
+        f"Dataset: **{p.name}** ({len(rows)} rows, {len(headers)} columns)",
+        f"  Modality: text",
+        f"  Text column: `{text_col or '?'}`",
+        f"  Label column: `{label_col or '?'}`",
         f"  Classes ({len(class_counts)}):",
     ]
     for cls, cnt in sorted(class_counts.items(), key=lambda x: -x[1]):
@@ -416,14 +416,24 @@ def _exec_assess_resources(arguments: dict) -> str:
     # Verdict
     if ram_ok and cpu_ok:
         lines.append("")
-        lines.append("Verdict: Local training viable")
-        lines.append("Options:")
-        lines.append("  [1] Local training — TF Keras, free, fast for small datasets")
-        lines.append("  [2] Cloud training — Vertex AI AutoML, ~$3-8, 30-60 min")
+        lines.append("**Verdict: Local training is viable**")
+        lines.append("")
+        lines.append("### Training Options")
+        lines.append(
+            "1. **Local training** — TF Keras, free, ~2-5 min for small datasets"
+        )
+        lines.append("2. **Cloud training** — Vertex AI AutoML, ~$3-8, 30-60 min")
+        lines.append("")
+        lines.append("---")
+        lines.append(
+            "**Which option do you prefer?** Type `1` for local or `2` for cloud."
+        )
     else:
         lines.append("")
-        lines.append("Verdict: Local resources insufficient for reliable training")
-        lines.append("Recommendation: Google Cloud Vertex AI")
+        lines.append("**Verdict: Local resources insufficient for reliable training**")
+        lines.append("")
+        lines.append("### Recommendation")
+        lines.append("**Cloud training only** — Vertex AI AutoML, ~$3-8, 30-60 min")
         reasons = []
         if not ram_ok:
             reasons.append(
@@ -431,8 +441,12 @@ def _exec_assess_resources(arguments: dict) -> str:
             )
         if not cpu_ok:
             reasons.append(f"Only {cpu_count} CPU core(s) available (2+ recommended)")
-        lines.append(f"  Rationale: {'; '.join(reasons)}.")
-        lines.append("  Estimated Cloud cost: ~$3-8 for typical dataset sizes.")
+        lines.append(f"Rationale: {'; '.join(reasons)}.")
+        lines.append("")
+        lines.append("---")
+        lines.append(
+            "Shall I proceed with cloud training? Type `yes` to confirm or describe your preference."
+        )
 
     return "\n".join(lines)
 
@@ -563,7 +577,7 @@ def _exec_train_model(arguments: dict) -> str:
     epochs = arguments.get("epochs", 10)
 
     model_path = run_training_with_progress(dataset, target, output_dir, epochs)
-    return f"Training complete. Model saved to: {model_path}"
+    return f"Training complete. Model saved to: `{model_path}`"
 
 
 def _exec_validate_model(arguments: dict) -> str:
@@ -593,9 +607,9 @@ def _exec_validate_model(arguments: dict) -> str:
         latency_str = "could not measure"
 
     lines = [
-        f"TFLite model: {tflite_path}",
-        f"  Size: {size_mb:.2f} MB — {'OK (limit 10 MB)' if size_ok else 'EXCEEDS 10 MB limit'}",
-        f"  Latency: {latency_str}",
+        f"TFLite model: `{tflite_path}`",
+        f"  **Size:** {size_mb:.2f} MB — {'OK (limit 10 MB)' if size_ok else 'EXCEEDS 10 MB limit'}",
+        f"  **Latency:** {latency_str}",
     ]
     return "\n".join(lines)
 
@@ -612,9 +626,9 @@ def _exec_deploy_model(arguments: dict) -> str:
     result = asyncio.run(edge_deploy(model_path, host=host, port=port))
     if result.success:
         return (
-            f"Deployed successfully to {result.device_id} in {result.elapsed_sec:.1f}s.\n"
-            f"  Model: {model_path}\n"
-            f"  SHA-256: {result.manifest.sha256[:16]}..."
+            f"Deployed successfully to **{result.device_id}** in {result.elapsed_sec:.1f}s.\n"
+            f"  Model: `{model_path}`\n"
+            f"  SHA-256: `{result.manifest.sha256[:16]}...`"
         )
     return f"Deployment failed: {result.error}"
 
@@ -632,7 +646,7 @@ def _exec_predict(arguments: dict) -> str:
         label, conf = classifier.predict(text)
         probs = classifier.predict_proba(text)
         log_prediction("./prediction_log.jsonl", text, label, conf, probs)
-        lines = [f"Predicted: {label} ({conf:.4f})"]
+        lines = [f"**Predicted:** {label} ({conf:.4f})"]
         for cls, prob in sorted(probs.items(), key=lambda x: -x[1])[1:]:
             lines.append(f"  {cls}: {prob:.4f}")
         return "\n".join(lines)
@@ -663,11 +677,11 @@ def _exec_check_monitoring() -> str:
 
     _, arize, train_cfg, _ = load_config()
 
-    lines = ["Monitoring Status:"]
+    lines = ["## Monitoring Status"]
     if arize.is_valid():
-        lines.append(f"  Phoenix: configured")
-        lines.append(f"    Endpoint: {arize.collector_endpoint}")
-        lines.append(f"    Project:  {arize.project_name}")
+        lines.append(f"  Phoenix: **configured**")
+        lines.append(f"    Endpoint: `{arize.collector_endpoint}`")
+        lines.append(f"    Project:  **{arize.project_name}**")
     else:
         lines.append("  Phoenix: not configured")
         lines.append(
@@ -683,7 +697,7 @@ def _exec_check_monitoring() -> str:
                     entries.append(json.loads(line))
         labeled = [e for e in entries if e.get("ground_truth")]
         lines.append(
-            f"  Prediction log: {len(entries)} entries ({len(labeled)} labeled)"
+            f"  Prediction log: **{len(entries)}** entries (**{len(labeled)}** labeled)"
         )
     else:
         lines.append(f"  Prediction log: not found at {log_path}")
@@ -718,16 +732,16 @@ def _exec_check_retrain() -> str:
     threshold = train_cfg.retrain_accuracy_threshold
 
     lines = [
-        f"Retrain Check:",
-        f"  Labeled predictions: {len(labeled)}",
-        f"  Current accuracy:    {accuracy:.2%}",
-        f"  Threshold:           {threshold:.2%}",
+        "## Retrain Check",
+        f"  Labeled predictions: **{len(labeled)}**",
+        f"  Current accuracy:    **{accuracy:.2%}**",
+        f"  Threshold:           **{threshold:.2%}**",
     ]
     if accuracy >= threshold:
         lines.append(f"  Accuracy is above threshold — no retrain needed.")
     else:
-        lines.append(f"  Accuracy below threshold — retrain recommended!")
-        lines.append(f"  Run: coralflow monitor --retrain --dataset <original.csv>")
+        lines.append(f"  Accuracy below threshold — **retrain recommended!**")
+        lines.append(f"  Run: `coralflow monitor --retrain --dataset <original.csv>`")
     return "\n".join(lines)
 
 
@@ -736,14 +750,39 @@ def _exec_run_shell(arguments: dict) -> str:
     if not cmd:
         return "No command provided."
 
-    full_cmd = f"coralflow {cmd}"
+    # Strip "coralflow" / "coralflow " prefix — LLM may include it
+    if cmd.startswith("coralflow "):
+        cmd = cmd[len("coralflow ") :]
+    elif cmd == "coralflow":
+        cmd = ""
+
+    if not cmd:
+        return "No command provided."
+
+    _coralflow_cmds = {
+        "agent",
+        "init",
+        "train",
+        "validate",
+        "deploy",
+        "monitor",
+        "cost",
+        "predict",
+    }
+    sub = cmd.split()[0] if cmd.split() else ""
+
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "edge_train.cli"] + cmd.split(),
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        if sub in _coralflow_cmds:
+            result = subprocess.run(
+                [sys.executable, "-m", "edge_train.cli"] + cmd.split(),
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        else:
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=300
+            )
         output = result.stdout
         if result.stderr:
             output += "\n[stderr]\n" + result.stderr
@@ -758,13 +797,15 @@ def _exec_get_status() -> str:
     from edge_train.agent import AgentState
 
     state = AgentState.load()
-    lines = ["CoralFlow Agent Status:"]
-    lines.append(f"  State file: ~/.coralflow/agent_state.json")
+    lines = [
+        "## CoralFlow Agent Status",
+        f"  State file: `~/.coralflow/agent_state.json`",
+    ]
 
     if state.dataset_path:
-        lines.append(f"  Active dataset: {state.dataset_path}")
+        lines.append(f"  Active dataset: `{state.dataset_path}`")
     if state.model_path:
-        lines.append(f"  Active model:   {state.model_path}")
+        lines.append(f"  Active model:   `{state.model_path}`")
     if state.task_type:
         lines.append(f"  Task type:      {state.task_type}")
     if state.deployment_target:

@@ -35,6 +35,6 @@ def sample_text_csv(temp_dir):
 def clear_env():
     """Remove edge-train env vars before each test."""
     for key in list(os.environ):
-        if key.startswith(("GCP_", "ARIZE_", "PHOENIX_", "EDGE_")):
+        if key.startswith(("GCP_", "ARIZE_", "PHOENIX_", "EDGE_", "CORALFLOW_")):
             os.environ.pop(key, None)
     yield

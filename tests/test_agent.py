@@ -202,7 +202,7 @@ class TestCLIAgent:
         assert "--endpoint" in result.output
         assert "--resume" in result.output
 
-    def test_exits_without_api_key(self):
+    def test_exits_without_api_key(self, clear_env):
         from edge_train.cli.agent import agent
         from click.testing import CliRunner
 
@@ -338,3 +338,160 @@ class TestScanModels:
         assert len(models) == 1
         assert models[0]["name"] == "test_model"
         assert models[0]["classes"] == ["A", "B"]
+
+
+class TestCoralFlowUI:
+    def _make_ui(self, capsys):
+        """Create a CoralFlowUI that captures output to stdout (pytest capsys)."""
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        # Override console to use the captured stdout
+        ui.console.file = capsys  # type: ignore[assignment]
+        return ui
+
+    def test_markdown_renders_bold(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.markdown("Hello **world**!")
+        captured = capsys.readouterr()
+        assert "world" in captured.out
+
+    def test_separator_produces_output(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.separator()
+        captured = capsys.readouterr()
+        # Rule produces a line of characters
+        assert len(captured.out.strip()) > 0
+
+    def test_info_renders_text(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.info("status message")
+        captured = capsys.readouterr()
+        assert "status message" in captured.out
+
+    def test_error_renders_text(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.error("something went wrong")
+        captured = capsys.readouterr()
+        assert "something went wrong" in captured.out
+
+    def test_tool_start_shows_name(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.tool_start("scan_datasets")
+        captured = capsys.readouterr()
+        assert "scan_datasets" in captured.out
+
+    def test_success_shows_checkmark(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.success("done")
+        captured = capsys.readouterr()
+        assert "done" in captured.out
+
+    def test_panel_renders_with_title(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.panel("panel **content**", title="My Title")
+        captured = capsys.readouterr()
+        assert "content" in captured.out
+        assert "My Title" in captured.out
+
+    def test_step_renders_title(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.step("Training Options")
+        captured = capsys.readouterr()
+        assert "Training Options" in captured.out
+
+    def test_raw_output(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.raw("streaming text")
+        captured = capsys.readouterr()
+        assert "streaming text" in captured.out
+
+    def test_prompt_fallback_uses_input(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        # Force no TTY so it uses input() fallback
+        ui._has_tty = False
+        monkeypatch.setattr("builtins.input", lambda prompt="": "hello")
+        result = ui.prompt("coralflow")
+        assert result == "hello"
+
+    def test_choose_returns_option_by_number(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui._has_tty = False
+        monkeypatch.setattr("builtins.input", lambda prompt="": "2")
+        result = ui.choose(["option A", "option B", "option C"])
+        assert result == "option B"
+
+    def test_choose_returns_custom_text(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui._has_tty = False
+
+        inputs = iter(["0", "my custom input"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        result = ui.choose(["option A", "option B"])
+        assert result == "my custom input"
+
+    def test_choose_returns_direct_text(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui._has_tty = False
+        monkeypatch.setattr("builtins.input", lambda prompt="": "free text response")
+        result = ui.choose(["option A"])
+        assert result == "free text response"
+
+    def test_confirm_yes(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui._has_tty = False
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        assert ui.confirm("Proceed") is True
+
+    def test_confirm_yes_default_empty(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui._has_tty = False
+        monkeypatch.setattr("builtins.input", lambda prompt="": "")
+        assert ui.confirm("Proceed") is True
+
+    def test_confirm_no(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui._has_tty = False
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+        assert ui.confirm("Proceed") is False
+
+    def test_choose_out_of_range_returns_none(self, monkeypatch):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui._has_tty = False
+        monkeypatch.setattr("builtins.input", lambda prompt="": "99")
+        result = ui.choose(["only one"])
+        assert result is None
