@@ -51,6 +51,14 @@ Format all responses in Markdown:
 - Keep it concise — terminal users don't need essays"""
 
 
+def _assistant_msg(resp) -> dict:
+    """Build an assistant message dict, including reasoning_content if present (DeepSeek)."""
+    msg: dict = {"role": "assistant", "content": resp.content or ""}
+    if resp.reasoning_content:
+        msg["reasoning_content"] = resp.reasoning_content
+    return msg
+
+
 def run_agent_loop(
     llm: "LLMClient", state, scan_result: str = "", ctx_summary: str = ""
 ):
@@ -125,7 +133,7 @@ def run_agent_loop(
             # Send to LLM for response
             resp = llm.chat(messages, TOOLS)
             if resp.content:
-                messages.append({"role": "assistant", "content": resp.content})
+                messages.append(_assistant_msg(resp))
                 ui.markdown(resp.content)
                 ui.separator()
             continue
@@ -138,25 +146,24 @@ def run_agent_loop(
         # Tool call loop
         while resp.tool_calls:
             # One assistant message with ALL tool_calls from this response
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": resp.content or "",
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(
-                                    tc.arguments, ensure_ascii=False
-                                ),
-                            },
-                        }
-                        for tc in resp.tool_calls
-                    ],
-                }
-            )
+            tc_msg: dict = {
+                "role": "assistant",
+                "content": resp.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        },
+                    }
+                    for tc in resp.tool_calls
+                ],
+            }
+            if resp.reasoning_content:
+                tc_msg["reasoning_content"] = resp.reasoning_content
+            messages.append(tc_msg)
 
             # Execute each tool and append results
             for tc in resp.tool_calls:
@@ -177,7 +184,7 @@ def run_agent_loop(
             resp = llm.chat(messages, TOOLS)
 
         if resp.content:
-            messages.append({"role": "assistant", "content": resp.content})
+            messages.append(_assistant_msg(resp))
             ui.markdown(resp.content)
             ui.separator()
 

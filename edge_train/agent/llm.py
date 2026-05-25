@@ -40,6 +40,7 @@ class ToolCall:
 @dataclass
 class LLMResponse:
     content: str | None = None
+    reasoning_content: str | None = None
     tool_calls: list[ToolCall] | None = None
 
 
@@ -97,6 +98,7 @@ class LLMClient:
         message = choice.get("message", {})
 
         content = message.get("content")
+        reasoning_content = message.get("reasoning_content")
         raw_tool_calls = message.get("tool_calls") or []
 
         tool_calls = None
@@ -120,4 +122,6 @@ class LLMClient:
                     )
                 )
 
-        return LLMResponse(content=content, tool_calls=tool_calls)
+        return LLMResponse(
+            content=content, reasoning_content=reasoning_content, tool_calls=tool_calls
+        )
