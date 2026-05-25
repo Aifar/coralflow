@@ -38,6 +38,7 @@ Guidelines:
 - After training, suggest validation and deployment
 - Show key results (accuracy, model size, latency) after each step
 - If Phoenix is configured, suggest monitoring after deployment
+- **Retrain simulation flow:** after training + predicting, use `label_predictions` (action='list') to show unlabeled predictions → ask the user which ones were wrong → call `label_predictions` (action='label') with the corrections → call `check_retrain` to trigger retraining if accuracy dropped
 - Be concise — users are in the terminal
 - **ALWAYS respond in English** — all responses, explanations, and tool outputs must be in English, regardless of the user's language
 
@@ -112,7 +113,7 @@ def run_agent_loop(
             messages.append(
                 {
                     "role": "tool",
-                    "tool_call_id": tool_call_msg["tool_call_id"],
+                    "tool_call_id": tool_call_msg["tool_calls"][0]["id"],
                     "content": result_text,
                 }
             )

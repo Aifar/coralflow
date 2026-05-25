@@ -206,6 +206,42 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "label_predictions",
+            "description": "List recent unlabeled predictions or add ground truth labels to simulate data drift for retraining.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "label"],
+                        "description": "'list' to show unlabeled entries, 'label' to add ground truth corrections.",
+                    },
+                    "labels": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "index": {
+                                    "type": "integer",
+                                    "description": "1-based index from the list output.",
+                                },
+                                "ground_truth": {
+                                    "type": "string",
+                                    "description": "The correct label for this entry.",
+                                },
+                            },
+                            "required": ["index", "ground_truth"],
+                        },
+                        "description": "List of corrections (only for action='label').",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_shell",
             "description": "Run any coralflow CLI command directly. Use for commands not covered by other tools.",
             "parameters": {
@@ -272,6 +308,8 @@ def execute_tool(name: str, arguments: dict, llm=None) -> str:
             return _exec_check_monitoring()
         elif name == "check_retrain":
             return _exec_check_retrain()
+        elif name == "label_predictions":
+            return _exec_label_predictions(arguments)
         elif name == "run_shell":
             return _exec_run_shell(arguments)
         elif name == "get_status":
@@ -797,6 +835,100 @@ def _exec_check_retrain() -> str:
         lines.append(f"  Accuracy below threshold — **retrain recommended!**")
         lines.append(f"  Run: `coralflow monitor --retrain --dataset <original.csv>`")
     return "\n".join(lines)
+
+
+def _exec_label_predictions(arguments: dict) -> str:
+    from edge_train.config import load_config
+
+    _, _, train_cfg, _ = load_config()
+    log_path = Path(train_cfg.prediction_log_path)
+    action = arguments.get("action", "list")
+
+    if not log_path.exists():
+        return f"No prediction log found at: `{log_path}`. Run some predictions first with `/predict`."
+
+    # Read all entries
+    entries: list[dict] = []
+    with open(log_path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                entries.append(json.loads(line))
+
+    if action == "list":
+        unlabeled = [e for e in entries if "ground_truth" not in e]
+        if not unlabeled:
+            labeled = len(entries) - len(unlabeled)
+            return (
+                f"All **{len(entries)}** predictions are already labeled.\n"
+                f"Use `/check_retrain` to see current accuracy and decide if retraining is needed."
+            )
+
+        recent = unlabeled[-20:]  # show last 20
+        lines = [
+            f"## Unlabeled Predictions (showing {len(recent)} of {len(unlabeled)})",
+            "",
+        ]
+        for i, e in enumerate(recent):
+            idx = entries.index(e) + 1  # 1-based
+            text = e.get("text", "")[:60]
+            pred = e.get("predicted_label", "?")
+            conf = e.get("confidence", 0)
+            lines.append(f"  **{idx}.** `{text}` → *{pred}* ({conf:.2%})")
+        lines.append("")
+        lines.append(
+            "To simulate data drift, tell me which predictions were wrong and what the correct label should be."
+        )
+        lines.append('Example: "entry 3 should be 购物, entry 5 should be 餐饮"')
+        return "\n".join(lines)
+
+    elif action == "label":
+        labels_list = arguments.get("labels", [])
+        if not labels_list:
+            return "Provide `labels` array with `index` and `ground_truth` for each correction."
+
+        updated = 0
+        lines = ["## Labeling Results", ""]
+        for item in labels_list:
+            idx = item.get("index", 0)
+            gt = item.get("ground_truth", "")
+            if 1 <= idx <= len(entries):
+                entries[idx - 1]["ground_truth"] = gt
+                text = entries[idx - 1].get("text", "")[:50]
+                pred = entries[idx - 1].get("predicted_label", "?")
+                lines.append(
+                    f"  ✓ entry **{idx}**: `{text}` → ground_truth = **{gt}** (was: *{pred}*)"
+                )
+                updated += 1
+            else:
+                lines.append(f"  ✗ entry **{idx}**: out of range (1-{len(entries)})")
+
+        # Write back
+        with open(log_path, "w", encoding="utf-8") as f:
+            for e in entries:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+        lines.append("")
+        lines.append(f"**{updated}** entries labeled.")
+
+        # Count correct vs incorrect
+        labeled = [e for e in entries if "ground_truth" in e]
+        correct = sum(1 for e in labeled if e["predicted_label"] == e["ground_truth"])
+        if labeled:
+            acc = correct / len(labeled)
+            lines.append(
+                f"Current accuracy: **{acc:.2%}** ({correct}/{len(labeled)} correct)"
+            )
+            threshold = train_cfg.retrain_accuracy_threshold
+            if acc < threshold and len(labeled) >= train_cfg.retrain_min_samples:
+                lines.append("")
+                lines.append(
+                    f"⚠ Accuracy is below threshold (**{threshold:.0%}**). "
+                    "Use `/check_retrain` to trigger retraining."
+                )
+
+        return "\n".join(lines)
+
+    return f"Unknown action: `{action}`. Use 'list' or 'label'."
 
 
 def _exec_run_shell(arguments: dict) -> str:

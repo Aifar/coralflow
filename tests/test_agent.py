@@ -251,6 +251,7 @@ class TestToolSchemas:
             "predict",
             "check_monitoring",
             "check_retrain",
+            "label_predictions",
             "run_shell",
             "get_status",
         }

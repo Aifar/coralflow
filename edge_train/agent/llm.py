@@ -64,16 +64,28 @@ class LLMClient:
 
         if tools:
             payload["tools"] = tools
-            payload["tool_choice"] = "auto"
 
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=120)
+            # Retry once without tool_choice / tools if the API rejects them
+            if resp.status_code == 400 and tools:
+                payload.pop("tools", None)
+                payload.pop("tool_choice", None)
+                resp = requests.post(url, headers=headers, json=payload, timeout=120)
             resp.raise_for_status()
             body = resp.json()
         except requests.Timeout:
             return LLMResponse(content="Error: LLM request timed out after 120s.")
         except requests.RequestException as e:
-            return LLMResponse(content=f"Error: LLM request failed: {e}")
+            detail = ""
+            try:
+                detail = resp.text[:500]  # type: ignore[unbound]
+            except Exception:
+                pass
+            msg = f"Error: LLM request failed: {e}"
+            if detail:
+                msg += f"\nResponse: {detail}"
+            return LLMResponse(content=msg)
 
         choice = body.get("choices", [{}])[0]
         message = choice.get("message", {})
