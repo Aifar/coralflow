@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -136,30 +137,37 @@ def run_agent_loop(
 
         # Tool call loop
         while resp.tool_calls:
+            # One assistant message with ALL tool_calls from this response
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": resp.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(
+                                    tc.arguments, ensure_ascii=False
+                                ),
+                            },
+                        }
+                        for tc in resp.tool_calls
+                    ],
+                }
+            )
+
+            # Execute each tool and append results
             for tc in resp.tool_calls:
                 ui.tool_start(tc.name)
                 result = execute_tool(tc.name, tc.arguments, llm=llm)
-
                 messages.append(
                     {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": json.dumps(
-                                        tc.arguments, ensure_ascii=False
-                                    ),
-                                },
-                            }
-                        ],
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": str(result) if result else "",
                     }
-                )
-                messages.append(
-                    {"role": "tool", "tool_call_id": tc.id, "content": result}
                 )
 
                 ui.separator()
@@ -233,10 +241,10 @@ def _handle_slash_command(
     else:
         result = execute_tool(tool_name, tool_args)
 
-    tool_call_id = f"call_{cmd}_{len(result)}"
+    tool_call_id = f"call_{secrets.token_hex(12)}"
     tool_call_msg = {
         "role": "assistant",
-        "content": None,
+        "content": "",
         "tool_calls": [
             {
                 "id": tool_call_id,

@@ -1,6 +1,7 @@
 """OpenAI-compatible LLM API client."""
 
 import json
+import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -87,24 +88,35 @@ class LLMClient:
                 msg += f"\nResponse: {detail}"
             return LLMResponse(content=msg)
 
-        choice = body.get("choices", [{}])[0]
+        choices = body.get("choices") or []
+        if not choices:
+            return LLMResponse(
+                content=body.get("error", {}).get("message", "No response from LLM.")
+            )
+        choice = choices[0]
         message = choice.get("message", {})
 
         content = message.get("content")
-        raw_tool_calls = message.get("tool_calls", [])
+        raw_tool_calls = message.get("tool_calls") or []
 
         tool_calls = None
         if raw_tool_calls:
             tool_calls = []
             for tc in raw_tool_calls:
                 func = tc.get("function", {})
-                try:
-                    args = json.loads(func.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    args = {}
+                raw_args = func.get("arguments", "{}")
+                if isinstance(raw_args, dict):
+                    args = raw_args
+                else:
+                    try:
+                        args = json.loads(raw_args) if raw_args else {}
+                    except json.JSONDecodeError:
+                        args = {}
                 tool_calls.append(
                     ToolCall(
-                        id=tc.get("id", ""), name=func.get("name", ""), arguments=args
+                        id=tc.get("id") or f"call_{secrets.token_hex(12)}",
+                        name=func.get("name", ""),
+                        arguments=args,
                     )
                 )
 
