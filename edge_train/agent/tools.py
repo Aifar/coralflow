@@ -634,7 +634,16 @@ def _exec_deploy_model(arguments: dict) -> str:
 
 
 def _exec_predict(arguments: dict) -> str:
-    from edge_train.inference import TextClassifier, log_prediction
+    from edge_train.config import load_config
+    from edge_train.inference import (
+        TextClassifier,
+        _ensure_phoenix_registered,
+        log_prediction,
+    )
+
+    _, arize, train_cfg, _ = load_config()
+    phoenix_active = _ensure_phoenix_registered(arize)
+    log_path = train_cfg.prediction_log_path
 
     model_path = arguments["model_path"]
     text = arguments.get("text")
@@ -645,16 +654,22 @@ def _exec_predict(arguments: dict) -> str:
     if text:
         label, conf = classifier.predict(text)
         probs = classifier.predict_proba(text)
-        log_prediction("./prediction_log.jsonl", text, label, conf, probs)
-        lines = [f"**Predicted:** {label} ({conf:.4f})"]
+        log_prediction(log_path, text, label, conf, probs, create_span=phoenix_active)
+        lines = [
+            f"**Predicted:** {label} ({conf:.4f})",
+        ]
         for cls, prob in sorted(probs.items(), key=lambda x: -x[1])[1:]:
             lines.append(f"  {cls}: {prob:.4f}")
+        if phoenix_active:
+            lines.append("")
+            lines.append(
+                f"📡 OTEL span sent to **Arize Phoenix** (`{arize.project_name}`)"
+            )
         return "\n".join(lines)
 
     if csv_path:
         with open(csv_path, encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
-        # Auto-detect text column
         from edge_train.cli.predict import _detect_text_column
 
         col = _detect_text_column(csv_path)
@@ -662,11 +677,23 @@ def _exec_predict(arguments: dict) -> str:
             return "Error: could not detect text column. Use --text-col to specify."
         texts = [r[col] for r in rows]
         results = classifier.predict_batch(texts)
-        lines = [f"Batch predictions ({len(results)} rows):"]
+        for i, (label, conf) in enumerate(results):
+            probs = classifier.predict_proba(texts[i])
+            log_prediction(
+                log_path, texts[i], label, conf, probs, create_span=phoenix_active
+            )
+        lines = [
+            f"Batch predictions (**{len(results)}** rows) logged to `{log_path}`",
+        ]
         for i, (label, conf) in enumerate(results[:10]):
-            lines.append(f"  {texts[i][:50]} → {label} ({conf:.4f})")
+            lines.append(f"  {texts[i][:50]} → **{label}** ({conf:.4f})")
         if len(results) > 10:
             lines.append(f"  ... and {len(results) - 10} more")
+        if phoenix_active:
+            lines.append("")
+            lines.append(
+                f"📡 **{len(results)}** OTEL spans sent to **Arize Phoenix** (`{arize.project_name}`)"
+            )
         return "\n".join(lines)
 
     return "Error: provide --text for single prediction or --csv for batch."
@@ -677,15 +704,42 @@ def _exec_check_monitoring() -> str:
 
     _, arize, train_cfg, _ = load_config()
 
-    lines = ["## Monitoring Status"]
+    lines = ["## Arize Phoenix Monitoring"]
     if arize.is_valid():
+        # Derive dashboard URL from collector endpoint
+        endpoint = arize.collector_endpoint
+        if "/v1/traces" in endpoint:
+            dashboard = endpoint.rsplit("/v1/traces", 1)[0]
+        else:
+            dashboard = "https://app.phoenix.arize.com"
         lines.append(f"  Phoenix: **configured**")
-        lines.append(f"    Endpoint: `{arize.collector_endpoint}`")
+        lines.append(f"    Endpoint: `{endpoint}`")
         lines.append(f"    Project:  **{arize.project_name}**")
-    else:
-        lines.append("  Phoenix: not configured")
+        lines.append(f"    Dashboard: {dashboard}")
+        lines.append("")
+        lines.append("Each `/predict` call sends OTEL spans to Arize Cloud:")
+        lines.append("- `input.value` — the text being classified")
         lines.append(
-            "    Set PHOENIX_API_KEY and PHOENIX_COLLECTOR_ENDPOINT to enable."
+            "- `output.value` — predicted label + confidence + all class probabilities"
+        )
+        lines.append("- `metadata` — model type and number of classes")
+        lines.append("")
+        lines.append(
+            "Open the dashboard to see traces, latency, and prediction distributions."
+        )
+        lines.append("Use `coralflow monitor --dashboard` to open in browser.")
+    else:
+        lines.append("  Phoenix: **not configured**")
+        lines.append("")
+        lines.append("To enable Arize Cloud monitoring:")
+        lines.append("```bash")
+        lines.append("export PHOENIX_API_KEY=your-api-key")
+        lines.append(
+            "export PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/v1/traces"
+        )
+        lines.append("```")
+        lines.append(
+            "Then restart the agent and `/predict` — spans will appear in real-time."
         )
 
     log_path = Path(train_cfg.prediction_log_path)
