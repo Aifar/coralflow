@@ -81,12 +81,20 @@ def _ensure_phoenix_registered(arize_config) -> bool:
     if not arize_config.is_valid():
         return False
     try:
+        import logging
+
+        logging.getLogger(
+            "opentelemetry.exporter.otlp.proto.http.trace_exporter"
+        ).setLevel(logging.CRITICAL)
+        logging.getLogger("opentelemetry.trace").setLevel(logging.CRITICAL)
+
         from phoenix.otel import register
 
         register(
             endpoint=arize_config.collector_endpoint,
             project_name=arize_config.project_name,
             auto_instrument=False,
+            verbose=False,
         )
         return True
     except Exception:

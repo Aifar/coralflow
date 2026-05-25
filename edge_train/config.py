@@ -35,7 +35,7 @@ class ArizeConfig:
     collector_endpoint: str = field(
         default_factory=lambda: os.environ.get(
             "PHOENIX_COLLECTOR_ENDPOINT",
-            "https://app.phoenix.arize.com/v1/traces",
+            "http://localhost:6006/v1/traces",
         )
     )
     project_name: str = field(

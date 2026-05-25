@@ -769,9 +769,20 @@ def _exec_check_monitoring() -> str:
     else:
         lines.append("  Phoenix: **not configured**")
         lines.append("")
-        lines.append("To enable Arize Cloud monitoring:")
+        lines.append("To enable Phoenix monitoring:")
+        lines.append("")
+        lines.append("**Option 1 — Local Phoenix** (recommended for development):")
         lines.append("```bash")
-        lines.append("export PHOENIX_API_KEY=your-api-key")
+        lines.append("pip install arize-phoenix")
+        lines.append("phoenix serve  # starts at http://localhost:6006")
+        lines.append(
+            "export PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006/v1/traces"
+        )
+        lines.append("```")
+        lines.append("")
+        lines.append("**Option 2 — Phoenix Cloud** (app.phoenix.arize.com):")
+        lines.append("```bash")
+        lines.append("export PHOENIX_API_KEY=your-cloud-api-key")
         lines.append(
             "export PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/v1/traces"
         )

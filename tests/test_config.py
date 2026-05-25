@@ -34,7 +34,7 @@ class TestArizeConfig:
 
     def test_defaults(self):
         cfg = ArizeConfig()
-        assert cfg.collector_endpoint == "https://app.phoenix.arize.com/v1/traces"
+        assert cfg.collector_endpoint == "http://localhost:6006/v1/traces"
         assert cfg.project_name == "edge-train"
         assert cfg.api_key == ""
         assert not cfg.is_valid()
