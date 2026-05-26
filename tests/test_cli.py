@@ -119,6 +119,21 @@ class TestTrainCommand:
         assert "GCP not configured" in result.output
 
 
+@pytest.fixture
+def phoenix_reachable(mocker):
+    """Phoenix HTTP probe succeeds for monitor CLI tests."""
+    status = mocker.MagicMock(
+        configured=True,
+        reachable=True,
+        is_local=False,
+        collector_endpoint="https://example.com/v1/traces",
+        dashboard_url="https://example.com",
+        detail="HTTP 200",
+    )
+    mocker.patch("edge_train.phoenix_util.check_phoenix_running", return_value=status)
+    return status
+
+
 class TestMonitorCommand:
     def test_monitor_not_configured(self, runner, clear_env):
         result = runner.invoke(monitor, [])
@@ -132,7 +147,7 @@ class TestMonitorCommand:
         assert "edge-train" in result.output
 
     def test_monitor_status_configured(
-        self, runner, clear_env, monkeypatch, mock_phoenix
+        self, runner, clear_env, monkeypatch, mock_phoenix, phoenix_reachable
     ):
         monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
         monkeypatch.setenv(
@@ -145,11 +160,12 @@ class TestMonitorCommand:
         assert "https://example.com/v1/traces" in result.output
         assert "my-project" in result.output
         assert "configured" in result.output
-        assert "connected" in result.output
+        assert "reachable" in result.output.lower()
+        assert "connected" in result.output.lower()
         mock_phoenix.register.assert_called_once()
 
     def test_monitor_register_prints_info(
-        self, runner, clear_env, monkeypatch, mock_phoenix
+        self, runner, clear_env, monkeypatch, mock_phoenix, phoenix_reachable
     ):
         monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
         monkeypatch.setenv(
@@ -164,10 +180,11 @@ class TestMonitorCommand:
             endpoint="https://example.com/v1/traces",
             project_name="edge-train",
             auto_instrument=False,
+            verbose=False,
         )
 
     def test_monitor_dashboard(
-        self, runner, clear_env, monkeypatch, mock_phoenix, mocker
+        self, runner, clear_env, monkeypatch, mock_phoenix, mocker, phoenix_reachable
     ):
         monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
         monkeypatch.setenv(
@@ -181,7 +198,7 @@ class TestMonitorCommand:
         mock_open.assert_called_once_with("https://app.phoenix.arize.com")
 
     def test_monitor_dashboard_derived_url(
-        self, runner, clear_env, monkeypatch, mock_phoenix, mocker
+        self, runner, clear_env, monkeypatch, mock_phoenix, mocker, phoenix_reachable
     ):
         monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
         monkeypatch.setenv(
@@ -194,7 +211,7 @@ class TestMonitorCommand:
         mock_open.assert_called_once_with("https://phoenix.example.com")
 
     def test_monitor_registration_failure(
-        self, runner, clear_env, monkeypatch, mock_phoenix
+        self, runner, clear_env, monkeypatch, mock_phoenix, phoenix_reachable
     ):
         monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
         monkeypatch.setenv(
@@ -206,7 +223,30 @@ class TestMonitorCommand:
         assert result.exit_code == 0
         assert "Connection refused" in result.output
 
-    def test_monitor_import_error(self, runner, clear_env, monkeypatch):
+    def test_monitor_not_running(self, runner, clear_env, monkeypatch, mocker):
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces"
+        )
+        mocker.patch(
+            "edge_train.phoenix_util.check_phoenix_running",
+            return_value=mocker.MagicMock(
+                configured=True,
+                reachable=False,
+                is_local=True,
+                collector_endpoint="http://localhost:6006/v1/traces",
+                dashboard_url="http://localhost:6006",
+                detail="connection refused",
+            ),
+        )
+        result = runner.invoke(monitor, [])
+        assert result.exit_code == 0
+        assert "not running" in result.output.lower()
+        assert "phoenix serve" in result.output.lower()
+
+    def test_monitor_import_error(
+        self, runner, clear_env, monkeypatch, phoenix_reachable
+    ):
         monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
         monkeypatch.setenv(
             "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"

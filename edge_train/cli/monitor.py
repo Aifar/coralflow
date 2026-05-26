@@ -9,10 +9,9 @@ import click
 
 
 def _derive_dashboard_url(endpoint: str) -> str:
-    """Derive the Phoenix dashboard URL from the collector endpoint."""
-    if "/v1/traces" in endpoint:
-        return endpoint.rsplit("/v1/traces", 1)[0]
-    return "https://app.phoenix.arize.com"
+    from edge_train.phoenix_util import derive_dashboard_url
+
+    return derive_dashboard_url(endpoint)
 
 
 @click.command()
@@ -84,30 +83,22 @@ def monitor(
         )
         return
 
-    try:
-        from phoenix.otel import register
+    from edge_train.phoenix_util import check_phoenix_running, ensure_phoenix_ready
 
-        register(
-            endpoint=arize.collector_endpoint,
-            project_name=arize.project_name,
-            auto_instrument=False,
-        )
-    except ImportError:
-        click.echo(
-            "  arize-phoenix-otel is not installed. "
-            "Run: pip install arize-phoenix-otel",
-            err=True,
-        )
-        return
-    except Exception as exc:
-        if status:
-            click.echo(f"  Status:                  not connected ({exc})")
+    probe = check_phoenix_running(arize)
+    if status:
+        if not probe.reachable:
+            click.echo(f"  Status:                  not running ({probe.detail})")
         else:
-            click.echo(f"  Failed to register Phoenix tracing: {exc}", err=True)
+            click.echo("  Status:                  reachable")
+
+    phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
+    if not phoenix_active:
+        click.echo(phoenix_err, err=True)
         return
 
     if status:
-        click.echo("  Status:                  connected")
+        click.echo("  Status:                  connected (OTEL registered)")
     else:
         click.echo("  Phoenix OTEL tracing registered.")
         click.echo(f"  Endpoint: {arize.collector_endpoint}")

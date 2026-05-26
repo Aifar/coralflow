@@ -392,6 +392,15 @@ class TestCoralFlowUI:
         captured = capsys.readouterr()
         assert "scan_datasets" in captured.out
 
+    def test_tool_start_shows_run_shell_command(self, capsys):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        ui.tool_start("run_shell", "train -d data.csv -o ./out")
+        captured = capsys.readouterr()
+        assert "run_shell" in captured.out
+        assert "train -d data.csv -o ./out" in captured.out
+
     def test_success_shows_checkmark(self, capsys):
         from edge_train.agent.ui import CoralFlowUI
 
@@ -496,3 +505,131 @@ class TestCoralFlowUI:
         monkeypatch.setattr("builtins.input", lambda prompt="": "99")
         result = ui.choose(["only one"])
         assert result is None
+
+
+class TestMessageHistory:
+    def test_prepare_drops_orphan_tool_message(self):
+        from edge_train.agent.loop import _prepare_messages_for_llm
+
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "tool", "tool_call_id": "call_abc", "content": "orphan"},
+            {"role": "user", "content": "3"},
+        ]
+        prepared = _prepare_messages_for_llm(messages)
+        roles = [m["role"] for m in prepared]
+        assert roles == ["system", "user"]
+
+    def test_prepare_keeps_complete_tool_turn(self):
+        from edge_train.agent.loop import _prepare_messages_for_llm
+
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {"name": "predict", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_abc", "content": "done"},
+            {"role": "user", "content": "3"},
+        ]
+        prepared = _prepare_messages_for_llm(messages)
+        assert len(prepared) == 3
+        assert prepared[0]["tool_calls"]
+        assert prepared[1]["role"] == "tool"
+
+    def test_trim_does_not_split_tool_block(self):
+        from edge_train.agent.loop import _trim_history
+
+        assistant_tc = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_x",
+                    "type": "function",
+                    "function": {"name": "scan_datasets", "arguments": "{}"},
+                }
+            ],
+        }
+        tool_msg = {"role": "tool", "tool_call_id": "call_x", "content": "ok"}
+        messages = [{"role": "system", "content": "s"}]
+        for i in range(25):
+            messages.append({"role": "user", "content": f"u{i}"})
+            messages.append({"role": "assistant", "content": f"a{i}"})
+        messages.extend([assistant_tc, tool_msg, {"role": "user", "content": "3"}])
+
+        _trim_history(messages, max_messages=10)
+        prepared_roles = []
+        from edge_train.agent.loop import _prepare_messages_for_llm
+
+        for m in _prepare_messages_for_llm(messages):
+            prepared_roles.append(m["role"])
+
+        assert "tool" not in prepared_roles or (
+            "assistant" in prepared_roles
+            and prepared_roles.index("assistant") < prepared_roles.index("tool")
+        )
+
+
+class TestSlashCommands:
+    def test_datasets_slash_runs_scan(self):
+        from edge_train.agent.loop import _handle_slash_command
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        msg, result = _handle_slash_command("/datasets", ui)
+        assert msg is not None
+        assert msg["tool_calls"][0]["function"]["name"] == "scan_datasets"
+        assert "dataset" in result.lower() or "No datasets" in result
+
+    def test_unknown_slash_returns_none(self, capsys):
+        from edge_train.agent.loop import _handle_slash_command
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        msg, result = _handle_slash_command("/notacommand", ui)
+        assert msg is None
+        assert result == ""
+
+
+class TestRunShell:
+    def test_coralflow_subcommand_streams_cli(self, monkeypatch):
+        from edge_train.agent.tools import execute_tool
+
+        calls = []
+
+        def fake_stream(argv, timeout=300):
+            calls.append((argv, timeout))
+            return "epoch 1/10", 0
+
+        monkeypatch.setattr("edge_train.agent.tools._stream_coralflow_cli", fake_stream)
+        result = execute_tool("run_shell", {"command": "train --help"})
+        assert "epoch" in result
+        assert "-m" in calls[0][0]
+        assert "edge_train.cli" in calls[0][0]
+
+    def test_other_commands_use_shell(self, monkeypatch):
+        from edge_train.agent.tools import execute_tool
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs.get("shell")))
+
+            class R:
+                stdout = "done"
+                stderr = ""
+                returncode = 0
+
+            return R()
+
+        monkeypatch.setattr("edge_train.agent.tools.subprocess.run", fake_run)
+        result = execute_tool("run_shell", {"command": "echo hello"})
+        assert "done" in result
+        assert calls[0] == ("echo hello", True)

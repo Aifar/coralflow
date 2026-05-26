@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run pip/python (or any command) inside the project virtual environment.
+# Examples:
+#   ./scripts/dev pip install -e ".[dev]"
+#   ./scripts/dev python -m pytest tests/ -v
+#   ./scripts/dev black --check edge_train/ tests/
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$ROOT/scripts/ensure_venv.sh" "$@"

@@ -77,28 +77,11 @@ class TextClassifier:
 
 
 def _ensure_phoenix_registered(arize_config) -> bool:
-    """Register Phoenix OTEL if configured and not already registered. Returns True if active."""
-    if not arize_config.is_valid():
-        return False
-    try:
-        import logging
+    """Register Phoenix OTEL if configured, reachable, and not already registered."""
+    from edge_train.phoenix_util import ensure_phoenix_ready
 
-        logging.getLogger(
-            "opentelemetry.exporter.otlp.proto.http.trace_exporter"
-        ).setLevel(logging.CRITICAL)
-        logging.getLogger("opentelemetry.trace").setLevel(logging.CRITICAL)
-
-        from phoenix.otel import register
-
-        register(
-            endpoint=arize_config.collector_endpoint,
-            project_name=arize_config.project_name,
-            auto_instrument=False,
-            verbose=False,
-        )
-        return True
-    except Exception:
-        return False
+    active, _ = ensure_phoenix_ready(arize_config)
+    return active
 
 
 def _create_prediction_span(

@@ -56,15 +56,18 @@ def predict(
     Single:  edge-train predict --model ./model_output --text "hello world"
     Batch:   edge-train predict --model ./model_output --csv input.csv -o predictions.csv
     """
-    from edge_train.inference import (
-        TextClassifier,
-        log_prediction,
-        _ensure_phoenix_registered,
-    )
+    from edge_train.inference import TextClassifier, log_prediction
+    from edge_train.phoenix_util import ensure_phoenix_ready
 
     _, arize, train_cfg, _ = load_config()
-    phoenix_active = _ensure_phoenix_registered(arize)
     log_file = log_path or train_cfg.prediction_log_path
+
+    phoenix_active = False
+    if arize.is_valid():
+        phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
+        if not phoenix_active:
+            click.echo(phoenix_err, err=True)
+            sys.exit(1)
 
     classifier = TextClassifier(model)
 

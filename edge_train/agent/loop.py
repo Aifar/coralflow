@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import secrets
 import shlex
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from edge_train.agent.tools import TOOLS, execute_tool
@@ -31,14 +30,17 @@ Guidelines:
 - **Training flow is mandatory: assess → choose → train**
 - When the user asks to train, you MUST first call `assess_resources` with the dataset path
 - After assessment, you MUST present the options and ask the user to choose (1 or 2)
+- When the user replies with only `1` or `2` after training options, call `train_model` for option 1; for option 2 explain cloud training and use `run_shell` with `train --cloud ...` if they confirm
 - Wait for the user's choice before calling `train_model` or suggesting cloud
+- Use `run_shell` for coralflow CLI subcommands (`train`, `predict`, `deploy`, `validate`, `monitor`, `cost`, `init`) when the user asks to run CLI-style commands
+- Prefer dedicated tools (`train_model`, `predict`, etc.) for the guided agent workflow; use `run_shell` when the user explicitly wants the CLI or passes CLI flags
 - If local resources are insufficient, explain why and recommend cloud
 - When the user asks to train, first scan for datasets and present options
 - If no local dataset matches, recommend public datasets from the web
 - Always validate a dataset before training — flag quality issues early
 - After training, suggest validation and deployment
 - Show key results (accuracy, model size, latency) after each step
-- If Phoenix is configured, suggest monitoring after deployment
+- If Phoenix is configured, suggest monitoring after deployment; `check_monitoring` verifies Phoenix is reachable before predict/monitor
 - **Retrain simulation flow:** after training + predicting, use `label_predictions` (action='list') to show unlabeled predictions → ask the user which ones were wrong → call `label_predictions` (action='label') with the corrections → call `check_retrain` to trigger retraining if accuracy dropped
 - Be concise — users are in the terminal
 - **ALWAYS respond in English** — all responses, explanations, and tool outputs must be in English, regardless of the user's language
@@ -59,13 +61,111 @@ def _assistant_msg(resp) -> dict:
     return msg
 
 
+def _prepare_messages_for_llm(messages: list[dict]) -> list[dict]:
+    """Ensure tool messages follow assistant tool_calls (OpenAI / DeepSeek requirement)."""
+    prepared: list[dict] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        role = msg.get("role")
+
+        if role == "tool":
+            i += 1
+            continue
+
+        if role == "assistant" and msg.get("tool_calls"):
+            tool_calls = msg["tool_calls"]
+            expected_ids = [tc.get("id") for tc in tool_calls if tc.get("id")]
+            i += 1
+            tool_by_id: dict[str, dict] = {}
+            while i < len(messages) and messages[i].get("role") == "tool":
+                tid = messages[i].get("tool_call_id")
+                if tid in expected_ids:
+                    tool_by_id[tid] = messages[i]
+                i += 1
+
+            if expected_ids and len(tool_by_id) == len(expected_ids):
+                prepared.append(msg)
+                for tid in expected_ids:
+                    prepared.append(tool_by_id[tid])
+            else:
+                stripped = {k: v for k, v in msg.items() if k != "tool_calls"}
+                content = stripped.get("content") or ""
+                if not content:
+                    stripped["content"] = "(tool call omitted — incomplete history)"
+                prepared.append(stripped)
+            continue
+
+        prepared.append(msg)
+        i += 1
+
+    return prepared
+
+
+def _run_llm_turn(messages: list[dict], llm: "LLMClient", ui: CoralFlowUI) -> None:
+    """Call LLM until no more tool calls; append all messages and print responses."""
+    resp = llm.chat(_prepare_messages_for_llm(messages), TOOLS)
+
+    while resp.tool_calls:
+        tc_msg: dict = {
+            "role": "assistant",
+            "content": resp.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                    },
+                }
+                for tc in resp.tool_calls
+            ],
+        }
+        if resp.reasoning_content:
+            tc_msg["reasoning_content"] = resp.reasoning_content
+        messages.append(tc_msg)
+
+        for tc in resp.tool_calls:
+            cmd = None
+            if tc.name == "run_shell":
+                cmd = (tc.arguments.get("command") or "").strip() or "(no command)"
+                ui.tool_start(tc.name, cmd)
+                sub = cmd.split()[0] if cmd.split() else ""
+                if sub in ("train", "validate"):
+                    ui.info(
+                        "Running CLI (may take several minutes) — live output below:"
+                    )
+            else:
+                ui.tool_start(tc.name)
+            result = execute_tool(tc.name, tc.arguments, llm=llm)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": str(result) if result else "",
+                }
+            )
+            ui.separator()
+            ui.markdown(result)
+            ui.separator()
+
+        resp = llm.chat(_prepare_messages_for_llm(messages), TOOLS)
+
+    if resp.content:
+        messages.append(_assistant_msg(resp))
+        ui.markdown(resp.content)
+        ui.separator()
+
+
 def run_agent_loop(
     llm: "LLMClient", state, scan_result: str = "", ctx_summary: str = ""
 ):
     """Main REPL: prompt → LLM → tools → response → repeat.
 
-    Slash commands are parsed into tool_calls, executed, and the result
-    is sent to the LLM for a response — keeping conversation context coherent.
+    Slash commands (except `/help`, `/exit`) run locally first; the result is
+    sent to the LLM for a follow-up reply. All other input goes to the LLM,
+    which decides which tools to call next.
     """
     ui = CoralFlowUI()
 
@@ -113,11 +213,11 @@ def run_agent_loop(
                 _print_help(ui)
                 continue
 
-            tool_call_msg, result_text = _handle_slash_command(user_input, llm, ui)
+            tool_call_msg, result_text = _handle_slash_command(user_input, ui)
             if tool_call_msg is None:
-                continue  # unhandled
+                continue
 
-            messages.append({"role": "user", "content": f"/{user_input[1:]}"})
+            messages.append({"role": "user", "content": user_input})
             messages.append(tool_call_msg)
             messages.append(
                 {
@@ -130,63 +230,12 @@ def run_agent_loop(
             ui.separator()
             ui.markdown(result_text)
 
-            # Send to LLM for response
-            resp = llm.chat(messages, TOOLS)
-            if resp.content:
-                messages.append(_assistant_msg(resp))
-                ui.markdown(resp.content)
-                ui.separator()
+            _run_llm_turn(messages, llm, ui)
             continue
 
-        # ── Normal text ──────────────────────────────────────────────
+        # ── Normal text → LLM decides tools ─────────────────────────
         messages.append({"role": "user", "content": user_input})
-
-        resp = llm.chat(messages, TOOLS)
-
-        # Tool call loop
-        while resp.tool_calls:
-            # One assistant message with ALL tool_calls from this response
-            tc_msg: dict = {
-                "role": "assistant",
-                "content": resp.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                        },
-                    }
-                    for tc in resp.tool_calls
-                ],
-            }
-            if resp.reasoning_content:
-                tc_msg["reasoning_content"] = resp.reasoning_content
-            messages.append(tc_msg)
-
-            # Execute each tool and append results
-            for tc in resp.tool_calls:
-                ui.tool_start(tc.name)
-                result = execute_tool(tc.name, tc.arguments, llm=llm)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": str(result) if result else "",
-                    }
-                )
-
-                ui.separator()
-                ui.markdown(result)
-                ui.separator()
-
-            resp = llm.chat(messages, TOOLS)
-
-        if resp.content:
-            messages.append(_assistant_msg(resp))
-            ui.markdown(resp.content)
-            ui.separator()
+        _run_llm_turn(messages, llm, ui)
 
         # Keep conversation bounded
         if len(messages) > 40:
@@ -200,10 +249,8 @@ def run_agent_loop(
             )
 
 
-def _handle_slash_command(
-    user_input: str, llm: "LLMClient", ui: CoralFlowUI
-) -> tuple[dict | None, str]:
-    """Parse a slash command into a tool_call message + execute it. Returns (tool_call_msg, result)."""
+def _handle_slash_command(user_input: str, ui: CoralFlowUI) -> tuple[dict | None, str]:
+    """Run a slash command locally, return (synthetic tool_call message, result)."""
     rest = user_input[1:].strip()
 
     parts = shlex.split(rest)
@@ -246,6 +293,10 @@ def _handle_slash_command(
     elif tool_name in ("scan_datasets", "get_status"):
         result = execute_tool(tool_name, {})
     else:
+        shell_cmd = tool_args.get("command", "")
+        ui.tool_start(tool_name, shell_cmd)
+        if shell_cmd.split()[0] in ("train", "validate"):
+            ui.info("Running CLI (may take several minutes) — live output below:")
         result = execute_tool(tool_name, tool_args)
 
     tool_call_id = f"call_{secrets.token_hex(12)}"
@@ -269,7 +320,7 @@ def _handle_slash_command(
 
 def _print_help(ui: CoralFlowUI):
     ui.panel(
-        """Available slash commands:
+        """Slash commands (run locally, then summarized by the LLM):
 - `/train <args>` — Train a model (e.g. `/train -d data.csv -o ./out`)
 - `/predict <args>` — Run predictions
 - `/deploy <args>` — Deploy a model to an edge device
@@ -283,8 +334,8 @@ def _print_help(ui: CoralFlowUI):
 - `/help` — Show this help
 - `/exit`, `/quit` — Save state and exit
 
-You can also just describe what you want to do in natural language
-and the agent will figure out the right commands to run.""",
+Natural language (e.g. "train on urgent", or `1` after training options) is
+sent to the LLM, which chooses tools (`train_model`, `run_shell`, etc.).""",
         title="CoralFlow Commands",
     )
 
@@ -304,10 +355,33 @@ def _save_and_exit(state, messages: list[dict], ui: CoralFlowUI):
     ui.success("State saved. Goodbye!")
 
 
-def _trim_history(messages: list[dict]):
-    """Keep system messages + last N exchanges to stay within context limits."""
+def _trim_history(messages: list[dict], max_messages: int = 30):
+    """Keep system messages + recent history without splitting tool/tool_calls pairs."""
     system_msgs = [m for m in messages if m["role"] == "system"]
     other_msgs = [m for m in messages if m["role"] != "system"]
+
+    blocks: list[list[dict]] = []
+    i = 0
+    while i < len(other_msgs):
+        m = other_msgs[i]
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            block = [m]
+            i += 1
+            while i < len(other_msgs) and other_msgs[i].get("role") == "tool":
+                block.append(other_msgs[i])
+                i += 1
+            blocks.append(block)
+        else:
+            blocks.append([m])
+            i += 1
+
+    total = sum(len(b) for b in blocks)
+    start = 0
+    while start < len(blocks) and total > max_messages:
+        total -= len(blocks[start])
+        start += 1
+
+    trimmed = [msg for block in blocks[start:] for msg in block]
     messages.clear()
     messages.extend(system_msgs)
-    messages.extend(other_msgs[-30:])
+    messages.extend(trimmed)

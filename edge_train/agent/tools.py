@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -243,7 +244,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_shell",
-            "description": "Run any coralflow CLI command directly. Use for commands not covered by other tools.",
+            "description": "Run a coralflow CLI subcommand or shell command. Use for train/predict/deploy/validate/monitor/cost/init with CLI flags, or when the user asks to run a terminal command.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -673,15 +674,17 @@ def _exec_deploy_model(arguments: dict) -> str:
 
 def _exec_predict(arguments: dict) -> str:
     from edge_train.config import load_config
-    from edge_train.inference import (
-        TextClassifier,
-        _ensure_phoenix_registered,
-        log_prediction,
-    )
+    from edge_train.inference import TextClassifier, log_prediction
+    from edge_train.phoenix_util import ensure_phoenix_ready
 
     _, arize, train_cfg, _ = load_config()
-    phoenix_active = _ensure_phoenix_registered(arize)
     log_path = train_cfg.prediction_log_path
+
+    phoenix_active = False
+    if arize.is_valid():
+        phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
+        if not phoenix_active:
+            return phoenix_err
 
     model_path = arguments["model_path"]
     text = arguments.get("text")
@@ -739,21 +742,45 @@ def _exec_predict(arguments: dict) -> str:
 
 def _exec_check_monitoring() -> str:
     from edge_train.config import load_config
+    from edge_train.phoenix_util import (
+        check_phoenix_running,
+        derive_dashboard_url,
+        format_phoenix_start_instructions,
+    )
 
     _, arize, train_cfg, _ = load_config()
 
     lines = ["## Arize Phoenix Monitoring"]
     if arize.is_valid():
-        # Derive dashboard URL from collector endpoint
         endpoint = arize.collector_endpoint
-        if "/v1/traces" in endpoint:
-            dashboard = endpoint.rsplit("/v1/traces", 1)[0]
-        else:
-            dashboard = "https://app.phoenix.arize.com"
+        dashboard = derive_dashboard_url(endpoint)
+        status = check_phoenix_running(arize)
         lines.append(f"  Phoenix: **configured**")
         lines.append(f"    Endpoint: `{endpoint}`")
         lines.append(f"    Project:  **{arize.project_name}**")
         lines.append(f"    Dashboard: {dashboard}")
+        if status.reachable:
+            lines.append("    Status:   **reachable** ✓")
+        else:
+            lines.append(f"    Status:   **not running** ({status.detail})")
+            lines.append("")
+            lines.append(format_phoenix_start_instructions(status))
+            log_path = Path(train_cfg.prediction_log_path)
+            if log_path.exists():
+                entries = []
+                with open(log_path, encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            entries.append(json.loads(line))
+                labeled = [e for e in entries if e.get("ground_truth")]
+                lines.append(
+                    f"\n  Prediction log: **{len(entries)}** entries "
+                    f"(**{len(labeled)}** labeled)"
+                )
+            else:
+                lines.append(f"\n  Prediction log: not found at {log_path}")
+            return "\n".join(lines)
+
         lines.append("")
         lines.append("Each `/predict` call sends OTEL spans to Arize Cloud:")
         lines.append("- `input.value` — the text being classified")
@@ -942,6 +969,54 @@ def _exec_label_predictions(arguments: dict) -> str:
     return f"Unknown action: `{action}`. Use 'list' or 'label'."
 
 
+_CORALFLOW_CLI_CMDS = frozenset(
+    {"agent", "init", "train", "validate", "deploy", "monitor", "cost", "predict"}
+)
+
+# Long-running CLI subcommands stream stdout instead of blocking silently.
+_LONG_RUNNING_CMDS = frozenset({"train", "validate"})
+
+
+def _subprocess_env() -> dict[str, str]:
+    """Quiet TensorFlow startup noise for subprocess CLI runs."""
+    env = os.environ.copy()
+    env.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+    env.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    return env
+
+
+def _stream_coralflow_cli(cmd_argv: list[str], timeout: int = 1800) -> tuple[str, int]:
+    """Run coralflow CLI with live terminal output. Returns (tail_output, exit_code)."""
+    from edge_train.agent.ui import CoralFlowUI
+
+    ui = CoralFlowUI()
+    output_lines: list[str] = []
+    proc = subprocess.Popen(
+        cmd_argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=_subprocess_env(),
+    )
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            output_lines.append(line)
+            if line.strip():
+                ui.raw(line + "\n")
+        return_code = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return "Command timed out.", 124
+
+    tail = "\n".join(output_lines[-100:])
+    return tail, return_code
+
+
 def _exec_run_shell(arguments: dict) -> str:
     cmd = arguments.get("command", "")
     if not cmd:
@@ -956,36 +1031,41 @@ def _exec_run_shell(arguments: dict) -> str:
     if not cmd:
         return "No command provided."
 
-    _coralflow_cmds = {
-        "agent",
-        "init",
-        "train",
-        "validate",
-        "deploy",
-        "monitor",
-        "cost",
-        "predict",
-    }
     sub = cmd.split()[0] if cmd.split() else ""
 
+    if sub == "predict":
+        from edge_train.config import load_config
+        from edge_train.phoenix_util import ensure_phoenix_ready
+
+        _, arize, _, _ = load_config()
+        if arize.is_valid():
+            phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
+            if not phoenix_active:
+                return phoenix_err
+
     try:
-        if sub in _coralflow_cmds:
-            result = subprocess.run(
-                [sys.executable, "-m", "edge_train.cli"] + cmd.split(),
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-        else:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=300
-            )
-        output = result.stdout
+        if sub in _CORALFLOW_CLI_CMDS:
+            cmd_argv = [sys.executable, "-m", "edge_train.cli"] + cmd.split()
+            timeout = 1800 if sub in _LONG_RUNNING_CMDS else 300
+            output, return_code = _stream_coralflow_cli(cmd_argv, timeout=timeout)
+            if return_code != 0:
+                return output.strip() or f"Command failed (exit code {return_code})"
+            return output.strip() or f"Command completed (exit code {return_code})"
+
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=_subprocess_env(),
+        )
+        output = result.stdout or ""
         if result.stderr:
             output += "\n[stderr]\n" + result.stderr
         return output.strip() or f"Command completed (exit code {result.returncode})"
     except subprocess.TimeoutExpired:
-        return "Command timed out (300s)."
+        return "Command timed out."
     except Exception as e:
         return f"Command failed: {e}"
 

@@ -64,9 +64,14 @@ class CoralFlowUI:
         """Red bold error message."""
         self.console.print(f"[bold red]{text}[/bold red]")
 
-    def tool_start(self, name: str) -> None:
+    def tool_start(self, name: str, detail: str | None = None) -> None:
         """Tool execution indicator."""
-        self.console.print(f"[bold blue]  ⚙ {name}...[/bold blue]")
+        if detail:
+            self.console.print(
+                f"[bold blue]  ⚙ {name}:[/bold blue] [cyan]{detail}[/cyan]"
+            )
+        else:
+            self.console.print(f"[bold blue]  ⚙ {name}...[/bold blue]")
 
     def success(self, text: str) -> None:
         """Green checkmark + message."""

@@ -71,11 +71,13 @@ Add `"ground_truth"` fields to log entries to enable retraining.
 ## Development
 
 ### Setup
+Use the project venv helper so `pip` / `python` never run on the system interpreter by mistake:
 ```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
+./scripts/dev pip install -e ".[dev]"
+# or: make install
 ```
+
+`scripts/ensure_venv.sh` creates `.venv` (via `uv venv` if available, else `python3 -m venv`) and activates it before the command runs.
 
 ### Commits
 - Never include `Co-Authored-By` trailers in commit messages
@@ -84,25 +86,27 @@ uv pip install -e ".[dev]"
 ### Before pushing
 **Always run locally first — never skip this.** CI failures waste time.
 ```bash
-source .venv/bin/activate && black --check --target-version py310 edge_train/ tests/
-source .venv/bin/activate && python -m pytest tests/ -v
+make format-check test
+# or:
+./scripts/dev python -m black --check --target-version py310 edge_train/ tests/
+./scripts/dev python -m pytest tests/ -v
 ```
-Both must pass before `git push`. If black check fails, run `black --target-version py310 edge_train/ tests/` to auto-fix.
+Both must pass before `git push`. If black check fails, run `make format` to auto-fix.
 
 ### Run all tests
 ```bash
-source .venv/bin/activate && python -m pytest tests/ -v
+make test
 ```
 
 ### Run specific tests
 ```bash
-python -m pytest tests/test_edge_deploy.py -v
-python -m pytest tests/ -k "deploy or edge" -v
+./scripts/dev python -m pytest tests/test_edge_deploy.py -v
+./scripts/dev python -m pytest tests/ -k "deploy or edge" -v
 ```
 
 ### Run CLI
 ```bash
-source .venv/bin/activate && python -c "from edge_train.cli import main; main(['deploy', '--help'])"
+./scripts/dev python -c "from edge_train.cli import main; main(['deploy', '--help'])"
 ```
 
 ### Run agent
