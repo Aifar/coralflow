@@ -5,14 +5,70 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-# Auto-load .env from project root or current directory
-_dotenv_path = Path(".env")
-if not _dotenv_path.exists():
-    _dotenv_path = Path(__file__).parent.parent / ".env"
-if _dotenv_path.exists():
+_PKG_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _bootstrap_env() -> None:
+    """Load .env from package root, then optional cwd .env (local overrides)."""
     from dotenv import load_dotenv
 
-    load_dotenv(_dotenv_path)
+    project_env = _PKG_ROOT / ".env"
+    if project_env.exists():
+        load_dotenv(project_env)
+
+    cwd_env = Path(".env")
+    if cwd_env.exists() and cwd_env.resolve() != project_env.resolve():
+        load_dotenv(cwd_env, override=True)
+
+    _normalize_gcp_env()
+
+
+def _normalize_gcp_env() -> None:
+    """Resolve credential paths and normalize GCS bucket URIs."""
+    creds = (
+        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+        .strip()
+        .strip('"')
+        .strip("'")
+    )
+    if creds:
+        cred_path = Path(creds)
+        if not cred_path.is_absolute():
+            cred_path = (_PKG_ROOT / cred_path).resolve()
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(cred_path)
+
+    bucket = os.environ.get("GCP_STAGING_BUCKET", "").strip()
+    if bucket and not bucket.startswith("gs://"):
+        os.environ["GCP_STAGING_BUCKET"] = f"gs://{bucket.lstrip('/')}"
+
+
+def ensure_gcp_credentials() -> tuple[bool, str]:
+    """Return (ok, error_message) before Vertex AI / GCS calls."""
+    creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if creds:
+        if not Path(creds).is_file():
+            return False, (
+                f"GOOGLE_APPLICATION_CREDENTIALS points to a missing file:\n  {creds}"
+            )
+        return True, ""
+
+    try:
+        import google.auth
+
+        google.auth.default()
+        return True, ""
+    except Exception as exc:
+        env_hint = _PKG_ROOT / ".env"
+        return False, (
+            "GCP Application Default Credentials not found.\n"
+            f"Add to {env_hint}:\n"
+            "  GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json\n"
+            f"Or run: gcloud auth application-default login\n"
+            f"Detail: {exc}"
+        )
+
+
+_bootstrap_env()
 
 
 @dataclass

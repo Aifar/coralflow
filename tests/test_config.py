@@ -32,7 +32,7 @@ class TestArizeConfig:
         cfg = ArizeConfig(api_key="", collector_endpoint="", project_name="")
         assert not cfg.is_valid()
 
-    def test_defaults(self):
+    def test_defaults(self, clear_env):
         cfg = ArizeConfig()
         assert cfg.collector_endpoint == "http://localhost:6006/v1/traces"
         assert cfg.project_name == "edge-train"
@@ -74,3 +74,31 @@ class TestLoadConfig:
         assert arize.api_key == "test-key"
         assert arize.collector_endpoint == "https://example.com/v1/traces"
         assert arize.project_name == "my-edge-project"
+
+    def test_staging_bucket_normalized(self, clear_env, monkeypatch):
+        from edge_train import config as cfg
+
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "my-bucket")
+        cfg._normalize_gcp_env()
+        assert os.environ["GCP_STAGING_BUCKET"] == "gs://my-bucket"
+
+    def test_relative_credentials_resolved(self, clear_env, monkeypatch, tmp_path):
+        from edge_train import config as cfg
+
+        key = tmp_path / "sa.json"
+        key.write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "key/sa.json")
+        monkeypatch.setattr(cfg, "_PKG_ROOT", tmp_path)
+        (tmp_path / "key").mkdir()
+        key2 = tmp_path / "key" / "sa.json"
+        key2.write_text("{}", encoding="utf-8")
+        cfg._normalize_gcp_env()
+        assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == str(key2.resolve())
+
+    def test_ensure_gcp_credentials_missing_file(self, clear_env, monkeypatch):
+        from edge_train.config import ensure_gcp_credentials
+
+        monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/no/such/key.json")
+        ok, err = ensure_gcp_credentials()
+        assert not ok
+        assert "missing file" in err.lower()

@@ -17,9 +17,12 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
 
     Requires CORALFLOW_LLM_API_KEY to be set.
     """
+    from edge_train.config import load_config
     from edge_train.agent.llm import LLMClient, LLMConfig
     from edge_train.agent.loop import run_agent_loop
     from edge_train.agent import AgentState, DatasetScanner, scan_models
+
+    load_config()  # load .env (GCP + LLM keys) before REPL / subprocess tools
 
     # Load config
     config = LLMConfig.from_env()

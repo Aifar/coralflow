@@ -2,6 +2,8 @@
 
 import click
 
+import edge_train.config  # noqa: F401 — bootstrap .env before subcommands
+
 from edge_train.cli.init import init
 from edge_train.cli.train import train
 from edge_train.cli.validate import validate

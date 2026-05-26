@@ -33,6 +33,12 @@ def submit_automl_job(
 
     Returns the job resource name for polling.
     """
+    from edge_train.config import ensure_gcp_credentials
+
+    ok, err = ensure_gcp_credentials()
+    if not ok:
+        raise RuntimeError(err)
+
     aip.init(project=project, location=location, staging_bucket=staging_bucket)
 
     dataset = _create_or_get_dataset(dataset_path, modality, project, location)
