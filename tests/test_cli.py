@@ -38,6 +38,11 @@ class TestMainCLI:
     def test_help(self, runner):
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
+
+    def test_demo_help(self, runner):
+        result = runner.invoke(main, ["demo", "--help"])
+        assert result.exit_code == 0
+        assert "retrain-loop" in result.output
         assert "coralflow" in result.output
 
     def test_no_command_shows_help(self, runner):

@@ -24,6 +24,7 @@ coralflow agent
 | Monitor | `monitor` | Phoenix OTEL tracing & retrain triggers |
 | Cost | `cost <dataset>` | Estimate Vertex AI training cost |
 | Agent | `agent` | LLM REPL with tools for the full workflow |
+| Demo | `demo retrain-loop` | Scripted drift → retrain → accuracy improvement |
 
 ## Quick start
 
@@ -95,6 +96,17 @@ coralflow monitor --retrain --dataset ./data/urgent.csv
 ```
 
 The agent can walk through labeling via `label_predictions` and `check_retrain`.
+
+### One-command retrain demo
+
+Runs a full loop: train a weak baseline, mispredict challenge phrases, merge labels, retrain, and print before/after accuracy:
+
+```bash
+coralflow demo retrain-loop
+# faster CI / laptop: coralflow demo retrain-loop --epochs 2 --retrain-epochs 5
+```
+
+Uses `builtin:urgent` by default. With `--hard` (default), the baseline never sees **紧急** / **重要** labels; the challenge set does, so accuracy drops below the retrain threshold, then improves after merge + retrain.
 
 ## Built-in datasets
 

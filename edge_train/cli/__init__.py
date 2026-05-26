@@ -10,6 +10,7 @@ from edge_train.cli.monitor import monitor
 from edge_train.cli.cost import cost
 from edge_train.cli.predict import predict
 from edge_train.cli.agent import agent
+from edge_train.cli.demo import demo
 
 
 @click.group()
@@ -29,6 +30,7 @@ main.add_command(deploy)
 main.add_command(monitor)
 main.add_command(cost)
 main.add_command(predict)
+main.add_command(demo)
 
 if __name__ == "__main__":
     main()

@@ -112,19 +112,19 @@ def monitor(
 
 def _check_and_retrain(arize, train_cfg, threshold, dataset_path, output_dir):
     """Read prediction log, compute accuracy on labeled data, retrain if needed."""
+    from edge_train.retrain import (
+        compute_accuracy,
+        labeled_entries,
+        read_prediction_log,
+    )
+
     log_path = Path(train_cfg.prediction_log_path)
     if not log_path.exists():
         click.echo(f"  No prediction log found at: {log_path}")
         return
 
-    entries = []
-    with open(log_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                entries.append(json.loads(line))
-
-    labeled = [e for e in entries if e.get("ground_truth") is not None]
+    entries = read_prediction_log(log_path)
+    labeled = labeled_entries(entries)
     if not labeled:
         click.echo(f"  No labeled entries in prediction log ({len(entries)} total).")
         click.echo(
@@ -137,11 +137,10 @@ def _check_and_retrain(arize, train_cfg, threshold, dataset_path, output_dir):
         click.echo(f"  Only {len(labeled)} labeled entries (need {min_samples}).")
         return
 
-    correct = sum(1 for e in labeled if e["predicted_label"] == e["ground_truth"])
-    accuracy = correct / len(labeled)
+    accuracy, correct, total = compute_accuracy(entries)
     accuracy_threshold = threshold or train_cfg.retrain_accuracy_threshold
 
-    click.echo(f"  Labeled predictions: {len(labeled)}")
+    click.echo(f"  Labeled predictions: {total}")
     click.echo(f"  Current accuracy:    {accuracy:.2%}")
     click.echo(f"  Threshold:           {accuracy_threshold:.2%}")
 
@@ -164,52 +163,18 @@ def _check_and_retrain(arize, train_cfg, threshold, dataset_path, output_dir):
 
 def _do_retrain(labeled_entries, dataset_path, output_dir, train_cfg):
     """Merge labeled data with original dataset and retrain."""
-    import csv
-    import tempfile
-    from datetime import datetime
+    from edge_train.retrain import retrain_from_labeled
 
-    # Read original CSV and append new labeled entries
-    merged_path = Path(tempfile.mkdtemp()) / "merged.csv"
-    with open(dataset_path, encoding="utf-8") as fin:
-        reader = csv.DictReader(fin)
-        headers = reader.fieldnames or []
-        rows = list(reader)
+    click.echo(f"  Merging {len(labeled_entries)} labeled rows into training data...")
 
-    # Detect text and label columns from original
-    from edge_train.trainer import _resolve_columns
-
-    text_col, label_col = _resolve_columns(dataset_path, None)
-
-    # Append new labeled data
-    for e in labeled_entries:
-        row = {h: "" for h in headers}
-        row[text_col] = e["text"]
-        row[label_col] = e["ground_truth"]
-        rows.append(row)
-
-    with open(merged_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    click.echo(
-        f"  Merged dataset: {len(rows)} rows (added {len(labeled_entries)} labeled)"
-    )
-
-    from edge_train.trainer import train_text_classifier
-
-    # Bump output dir with timestamp so we don't overwrite
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    retrain_out = Path(output_dir).parent / f"{Path(output_dir).name}_{ts}"
-
-    model_path = train_text_classifier(
-        dataset_path=str(merged_path),
-        target_column=label_col,
-        output_dir=str(retrain_out),
-        epochs=train_cfg.local_epochs,
+    model_path = retrain_from_labeled(
+        labeled_entries,
+        dataset_path,
+        output_dir,
+        train_cfg.local_epochs,
     )
 
     click.echo(f"  Retrained model saved to: {model_path}")
     click.echo(
-        f"  Next: edge-train validate --model {model_path} --output {model_path}.tflite"
+        f"  Next: coralflow validate --model {model_path} --output {model_path}.tflite"
     )

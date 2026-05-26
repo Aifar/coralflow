@@ -29,7 +29,14 @@ def _detect_columns(csv_path: str) -> tuple[str, str]:
             "description",
         ):
             text_col = h
-        elif lower in ("label", "class", "category", "target", "intent"):
+        elif lower in (
+            "label",
+            "class",
+            "category",
+            "target",
+            "intent",
+            "urgency",
+        ):
             label_col = h
 
     if text_col is None:
