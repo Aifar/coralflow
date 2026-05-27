@@ -68,6 +68,14 @@ def ensure_gcp_credentials() -> tuple[bool, str]:
         )
 
 
+def gcs_bucket_name(staging_bucket: str) -> str:
+    """Extract bucket name from gs://bucket or gs://bucket/prefix."""
+    bucket = staging_bucket.strip()
+    if bucket.startswith("gs://"):
+        bucket = bucket[5:]
+    return bucket.split("/")[0].strip()
+
+
 _bootstrap_env()
 
 
@@ -79,6 +87,11 @@ class GCPConfig:
     )
     staging_bucket: str = field(
         default_factory=lambda: os.environ.get("GCP_STAGING_BUCKET", "")
+    )
+    finetune_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "GCP_FINETUNE_MODEL", "gemini-2.0-flash-001"
+        )
     )
 
     def is_valid(self) -> bool:

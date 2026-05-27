@@ -111,13 +111,53 @@ def infer_modality(path: Path) -> str:
         return _infer_modality_from_csv(path)
     if suffix in (".jpg", ".jpeg", ".png", ".bmp", ".webp"):
         return "image"
+    if suffix in (".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"):
+        return "video"
     if suffix in (".wav", ".mp3", ".flac", ".ogg"):
         return "sound"
     return "unknown"
 
 
 def infer_modality_from_path(path: str) -> str:
+    _ensure_loaded()
+    if path.startswith("builtin:"):
+        name = path.split(":", 1)[1]
+        builtin = _BUILTIN_DATASETS.get(name)
+        if builtin:
+            return builtin.get("modality", "text")
+        return "unknown"
+    if not Path(path).exists() and path in _BUILTIN_DATASETS:
+        return _BUILTIN_DATASETS[path].get("modality", "text")
     return infer_modality(Path(path))
+
+
+def resolve_dataset_path(path: str) -> tuple[str, str | None]:
+    """Materialize built-in datasets to a temp CSV. Returns (csv_path, modality|None).
+
+    Accepts ``builtin:urgent`` or bare ``urgent`` / ``expense`` when not a local file.
+    """
+    _ensure_loaded()
+    name: str | None = None
+    if path.startswith("builtin:"):
+        name = path.split(":", 1)[1]
+    elif not Path(path).exists() and path in _BUILTIN_DATASETS:
+        name = path
+
+    if name is None:
+        return path, None
+
+    builtin = _BUILTIN_DATASETS.get(name)
+    if not builtin:
+        available = ", ".join(sorted(_BUILTIN_DATASETS))
+        raise ValueError(
+            f"Unknown built-in dataset '{name}'. Available: {available or '(none)'}"
+        )
+
+    import tempfile
+
+    tmp = Path(tempfile.mkdtemp(prefix="coralflow-")) / f"{name}.csv"
+    tmp.write_text(builtin["csv_content"], encoding="utf-8")
+    return str(tmp), builtin.get("modality")
 
 
 def _infer_modality_from_csv(path: Path) -> str:

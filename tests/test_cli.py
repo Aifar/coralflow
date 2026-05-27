@@ -2,6 +2,7 @@
 
 import builtins
 import sys
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -43,7 +44,7 @@ class TestMainCLI:
         result = runner.invoke(main, ["demo", "--help"])
         assert result.exit_code == 0
         assert "retrain-loop" in result.output
-        assert "coralflow" in result.output
+        assert "Demonstration" in result.output
 
     def test_no_command_shows_help(self, runner):
         result = runner.invoke(main, [])
@@ -122,6 +123,53 @@ class TestTrainCommand:
         result = runner.invoke(train, ["-d", sample_text_csv, "--cloud"])
         assert result.exit_code != 0
         assert "GCP not configured" in result.output
+
+    def test_train_cloud_text_finetune(self, runner, mocker, monkeypatch):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        mock_submit = mocker.patch(
+            "edge_train.cloud.submit_automl_job",
+            return_value="projects/test/locations/us-central1/tuningJobs/1",
+        )
+        mocker.patch(
+            "edge_train.cloud.poll_job",
+            return_value={"model_path": "projects/test/tunedModels/1", "accuracy": 0.0},
+        )
+        mocker.patch(
+            "edge_train.config.ensure_gcp_credentials", return_value=(True, "")
+        )
+
+        result = runner.invoke(
+            train,
+            ["-d", "builtin:urgent", "--cloud", "--timeout", "1"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Cloud method: Gemini Fine-Tuning" in result.output
+        assert "Modality: text" in result.output
+        assert "Staging bucket: gs://test-bucket" in result.output
+        assert mock_submit.called
+
+    def test_train_builtin_resolves_modality_local(self, runner, tmp_path):
+        out = tmp_path / "model"
+        result = runner.invoke(
+            train,
+            ["-d", "builtin:urgent", "-o", str(out), "--epochs", "1"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Modality: text" in result.output
+        assert "builtin:urgent" in result.output
+        assert "Resolved CSV:" in result.output
+        assert "Training locally" in result.output
+
+    def test_train_bare_builtin_name_resolves_local(self, runner, tmp_path):
+        out = tmp_path / "model"
+        result = runner.invoke(
+            train,
+            ["-d", "urgent", "-o", str(out), "--type", "text", "--epochs", "1"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Resolved CSV:" in result.output
+        assert "Training locally" in result.output
 
 
 @pytest.fixture

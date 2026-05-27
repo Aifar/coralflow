@@ -187,18 +187,18 @@ class Recommender:
         modality = dataset_info.get("modality", "text")
         num_classes = len(dataset_info.get("classes", []))
 
-        if modality in ("image", "table", "sound"):
+        if modality in ("image", "table", "video", "sound"):
             return {
                 "method": "cloud",
                 "epochs": None,
-                "reason": f"{modality.capitalize()} modality requires cloud training (Vertex AI AutoML).",
+                "reason": f"{modality.capitalize()} modality uses Vertex AI AutoML on cloud.",
             }
 
         if rows >= 10000:
             return {
                 "method": "cloud",
                 "epochs": None,
-                "reason": f"Large dataset ({rows:,} rows) — cloud training recommended for speed.",
+                "reason": f"Large dataset ({rows:,} rows) — cloud fine-tuning recommended for speed.",
             }
 
         # Local training recommendation

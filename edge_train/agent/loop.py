@@ -30,7 +30,8 @@ Guidelines:
 - **Training flow is mandatory: assess → choose → train**
 - When the user asks to train, you MUST first call `assess_resources` with the dataset path
 - After assessment, you MUST present the options and ask the user to choose (1 or 2)
-- When the user replies with only `1` or `2` after training options, call `train_model` for option 1; for option 2 explain cloud training and use `run_shell` with `train --cloud ...` if they confirm
+- When the user replies with only `1` or `2` after training options, call `train_model` for option 1; for option 2 use `run_shell` with `train --cloud ...` (auto-routed: Gemini SFT for text, AutoML Tabular/Image/Video otherwise)
+- For cloud **text** training (Gemini Fine-Tuning), always state which **publisher base model** will be fine-tuned (from `GCP_FINETUNE_MODEL`, default `gemini-2.0-flash-001`). Mention `coralflow models list` to see alternatives and `--base-model` / `GCP_FINETUNE_MODEL` to change it
 - Wait for the user's choice before calling `train_model` or suggesting cloud
 - Use `run_shell` for coralflow CLI subcommands (`train`, `predict`, `deploy`, `validate`, `monitor`, `cost`, `init`) when the user asks to run CLI-style commands
 - Prefer dedicated tools (`train_model`, `predict`, etc.) for the guided agent workflow; use `run_shell` when the user explicitly wants the CLI or passes CLI flags

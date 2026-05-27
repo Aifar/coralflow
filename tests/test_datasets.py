@@ -6,6 +6,7 @@ from edge_train.datasets import (
     get_builtin,
     infer_modality,
     infer_modality_from_path,
+    resolve_dataset_path,
 )
 
 
@@ -85,3 +86,21 @@ class TestInferModality:
         p = temp_dir / "test.csv"
         p.write_text("content,rating\nnice,5\n", encoding="utf-8")
         assert infer_modality_from_path(str(p)) == "text"
+
+    def test_infer_modality_from_path_builtin(self):
+        assert infer_modality_from_path("builtin:urgent") == "text"
+        assert infer_modality_from_path("urgent") == "text"
+        assert infer_modality_from_path("builtin:unknown") == "unknown"
+
+    def test_resolve_dataset_path_builtin(self):
+        path, modality = resolve_dataset_path("builtin:urgent")
+        assert modality == "text"
+        assert path.endswith("urgent.csv")
+        assert Path(path).exists()
+        assert Path(path).read_text(encoding="utf-8").startswith("text,urgency")
+
+    def test_resolve_dataset_path_bare_builtin_name(self):
+        path, modality = resolve_dataset_path("urgent")
+        assert modality == "text"
+        assert path.endswith("urgent.csv")
+        assert Path(path).exists()

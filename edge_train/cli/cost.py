@@ -20,9 +20,10 @@ def cost(dataset_name: str | None, hours: float | None):
     """
     # Vertex AI AutoML pricing (approximate, per hour)
     PRICING = {
-        "text": 40.0,
+        "text": 12.0,
         "image": 25.0,
         "table": 50.0,
+        "video": 30.0,
     }
 
     if dataset_name:
@@ -41,9 +42,11 @@ def cost(dataset_name: str | None, hours: float | None):
     else:
         click.echo("  edge-train cost estimator")
         click.echo("")
-        click.echo("  Hourly rates (Vertex AI AutoML):")
-        for mod, rate in PRICING.items():
-            click.echo(f"    {mod:<8} ${rate:.0f}/hr")
+        click.echo("  Hourly rates (Vertex AI, approximate):")
+        click.echo("    text     $12/hr  (Gemini fine-tuning)")
+        click.echo("    table    $50/hr  (AutoML Tabular)")
+        click.echo("    image    $25/hr  (AutoML Image)")
+        click.echo("    video    $30/hr  (AutoML Video)")
         click.echo("")
         click.echo("  Example — built-in text datasets (~5 min training):")
         click.echo(f"    ~$3.30 per training run")

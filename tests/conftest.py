@@ -31,6 +31,20 @@ def sample_text_csv(temp_dir):
     return str(path)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_training_history(monkeypatch, tmp_path):
+    """Keep training history out of the user's home directory during tests."""
+    path = tmp_path / "training_history.json"
+    monkeypatch.setenv("CORALFLOW_TRAINING_HISTORY_PATH", str(path))
+
+
+@pytest.fixture
+def isolated_training_history(temp_dir, monkeypatch):
+    path = temp_dir / "training_history.json"
+    monkeypatch.setenv("CORALFLOW_TRAINING_HISTORY_PATH", str(path))
+    return path
+
+
 @pytest.fixture
 def clear_env():
     """Remove edge-train env vars before each test."""

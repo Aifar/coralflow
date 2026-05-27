@@ -75,6 +75,15 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
             for m in models:
                 classes_str = ", ".join(m.get("classes", [])[:5])
                 scan_lines.append(f"  • {m['name']} — [{classes_str}]")
+
+        from edge_train.training_history import TrainingHistory, format_startup_summary
+
+        history = TrainingHistory.load()
+        history.sync_cloud_jobs()
+        training_summary = format_startup_summary(history)
+        if training_summary:
+            scan_lines.append(training_summary)
+
         scan_result = (
             "\n".join(scan_lines) if scan_lines else "No datasets or models found."
         )

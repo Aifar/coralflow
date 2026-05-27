@@ -102,3 +102,10 @@ class TestLoadConfig:
         ok, err = ensure_gcp_credentials()
         assert not ok
         assert "missing file" in err.lower()
+
+    def test_gcs_bucket_name(self):
+        from edge_train.config import gcs_bucket_name
+
+        assert gcs_bucket_name("gs://coralflow") == "coralflow"
+        assert gcs_bucket_name("coralflow") == "coralflow"
+        assert gcs_bucket_name("gs://coralflow/prefix") == "coralflow"

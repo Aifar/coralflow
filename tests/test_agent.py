@@ -123,13 +123,22 @@ class TestRecommender:
         assert rec["method"] == "local"
         assert rec["epochs"] is not None
 
-    def test_recommends_cloud_for_large_dataset(self):
+    def test_recommends_cloud_for_large_table_dataset(self):
+        from edge_train.agent import Recommender
+
+        rec = Recommender.recommend(
+            {"rows": 50000, "classes": ["A", "B"], "modality": "table"}
+        )
+        assert rec["method"] == "cloud"
+
+    def test_large_text_recommends_cloud_finetune(self):
         from edge_train.agent import Recommender
 
         rec = Recommender.recommend(
             {"rows": 50000, "classes": ["A", "B"], "modality": "text"}
         )
         assert rec["method"] == "cloud"
+        assert "fine-tuning" in rec["reason"].lower()
 
     def test_recommends_cloud_for_image(self):
         from edge_train.agent import Recommender

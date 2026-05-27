@@ -398,6 +398,30 @@ def _exec_analyze_dataset(arguments: dict) -> str:
     return "\n".join(lines)
 
 
+def _append_cloud_option_details(
+    lines: list[str],
+    cloud_plan,
+    *,
+    markdown: bool = False,
+) -> None:
+    """Add cloud training details, including fine-tune base model when applicable."""
+    from edge_train.cloud.router import CloudTrainingMethod
+    from edge_train.config import GCPConfig
+
+    gcp = GCPConfig()
+    if cloud_plan.method == CloudTrainingMethod.GEMINI_FINETUNE:
+        from edge_train.cloud.publisher_models import describe_finetune_base_model
+
+        lines.append("")
+        lines.extend(
+            describe_finetune_base_model(
+                gcp.finetune_model,
+                gcp.location or "us-central1",
+                markdown=markdown,
+            )
+        )
+
+
 def _exec_assess_resources(arguments: dict) -> str:
     import os
 
@@ -438,6 +462,23 @@ def _exec_assess_resources(arguments: dict) -> str:
 
     # Dataset fit estimate
     dataset_path = arguments.get("dataset_path", "")
+    dataset_modality = "text"
+    cloud_plan = None
+    if dataset_path:
+        try:
+            from edge_train.cloud.router import plan_cloud_training
+            from edge_train.datasets import (
+                infer_modality_from_path,
+                resolve_dataset_path,
+            )
+
+            resolved_path, builtin_mod = resolve_dataset_path(dataset_path)
+            dataset_modality = builtin_mod or infer_modality_from_path(dataset_path)
+            cloud_plan = plan_cloud_training(resolved_path, dataset_modality)
+        except ValueError:
+            pass
+    cloud_training_available = cloud_plan is not None
+
     if (
         dataset_path
         and not dataset_path.startswith("builtin:")
@@ -461,18 +502,46 @@ def _exec_assess_resources(arguments: dict) -> str:
         lines.append(
             "1. **Local training** — TF Keras, free, ~2-5 min for small datasets"
         )
-        lines.append("2. **Cloud training** — Vertex AI AutoML, ~$3-8, 30-60 min")
-        lines.append("")
-        lines.append("---")
-        lines.append(
-            "**Which option do you prefer?** Type `1` for local or `2` for cloud."
-        )
+        if cloud_training_available and cloud_plan:
+            lines.append(
+                f"2. **Cloud training** — {cloud_plan.label}, ~$3-15, 30-90 min"
+            )
+            lines.append(f"   _{cloud_plan.reason}_")
+            _append_cloud_option_details(lines, cloud_plan, markdown=True)
+            lines.append("")
+            lines.append("---")
+            lines.append(
+                "**Which option do you prefer?** Type `1` for local or `2` for cloud."
+            )
+        else:
+            lines.append("")
+            lines.append(
+                "**Note:** Cloud training is not available for this dataset modality."
+            )
+            lines.append("")
+            lines.append("---")
+            lines.append(
+                "**Which option do you prefer?** Type `1` to start local training."
+            )
     else:
         lines.append("")
-        lines.append("**Verdict: Local resources insufficient for reliable training**")
-        lines.append("")
-        lines.append("### Recommendation")
-        lines.append("**Cloud training only** — Vertex AI AutoML, ~$3-8, 30-60 min")
+        if cloud_training_available and cloud_plan:
+            lines.append(
+                "**Verdict: Local resources insufficient for reliable training**"
+            )
+            lines.append("")
+            lines.append("### Recommendation")
+            lines.append(f"**{cloud_plan.label}** — {cloud_plan.reason.split(';')[0]}")
+            _append_cloud_option_details(lines, cloud_plan, markdown=True)
+        else:
+            lines.append(
+                "**Verdict: Local resources are tight; no cloud path for this modality**"
+            )
+            lines.append("")
+            lines.append("### Recommendation")
+            lines.append(
+                "**Local training** — reduce dataset size or free RAM and retry."
+            )
         reasons = []
         if not ram_ok:
             reasons.append(
@@ -483,9 +552,12 @@ def _exec_assess_resources(arguments: dict) -> str:
         lines.append(f"Rationale: {'; '.join(reasons)}.")
         lines.append("")
         lines.append("---")
-        lines.append(
-            "Shall I proceed with cloud training? Type `yes` to confirm or describe your preference."
-        )
+        if cloud_training_available:
+            lines.append(
+                "Shall I proceed with cloud training? Type `yes` to confirm or describe your preference."
+            )
+        else:
+            lines.append("Proceed with local training? Type `1` or `yes` to confirm.")
 
     return "\n".join(lines)
 
@@ -1072,11 +1144,15 @@ def _exec_run_shell(arguments: dict) -> str:
 
 def _exec_get_status() -> str:
     from edge_train.agent import AgentState
+    from edge_train.training_history import TrainingHistory, format_startup_summary
 
     state = AgentState.load()
+    history = TrainingHistory.load()
+    history.sync_cloud_jobs()
     lines = [
         "## CoralFlow Agent Status",
         f"  State file: `~/.coralflow/agent_state.json`",
+        f"  Training history: `~/.coralflow/training_history.json`",
     ]
 
     if state.dataset_path:
@@ -1099,6 +1175,11 @@ def _exec_get_status() -> str:
     models = scan_models()
     lines.append(f"  Datasets found: {len(datasets)}")
     lines.append(f"  Models found:   {len(models)}")
+
+    training_summary = format_startup_summary(history)
+    if training_summary:
+        lines.append("")
+        lines.append(training_summary)
 
     if not state.dataset_path and not state.model_path:
         lines.append("  (fresh session — no prior state)")
