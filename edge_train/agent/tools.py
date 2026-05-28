@@ -891,7 +891,10 @@ def _exec_predict(arguments: dict, ui=None) -> str:
         )
 
     if endpoint:
-        from edge_train.cli.predict import _load_vertex_predictor, _resolve_endpoint_modality
+        from edge_train.cli.predict import (
+            _load_vertex_predictor,
+            _resolve_endpoint_modality,
+        )
         from edge_train.config import GCPConfig
         from edge_train.evaluate import format_inference_environment
 
@@ -917,11 +920,19 @@ def _exec_predict(arguments: dict, ui=None) -> str:
                 else str(payload)
             )
             log_prediction(
-                log_path, display, label, conf, probs, create_span=phoenix_active, source=source
+                log_path,
+                display,
+                label,
+                conf,
+                probs,
+                create_span=phoenix_active,
+                source=source,
             )
             lines = [env, "", f"**Predicted:** {label} ({conf:.4f})"]
             if phoenix_active:
-                lines.append(f"📡 OTEL span → **Arize Phoenix** (`{arize.project_name}`)")
+                lines.append(
+                    f"📡 OTEL span → **Arize Phoenix** (`{arize.project_name}`)"
+                )
             elif phoenix_note:
                 lines.append(f"⚠️ {phoenix_note}")
             return "\n".join(lines)
@@ -938,9 +949,7 @@ def _exec_predict(arguments: dict, ui=None) -> str:
             )
             return env + "\n\n" + tail
 
-        return (
-            f"{env}\n\nError: provide `text`, `gcs_uri`, `image`, or `csv_path` for Vertex predict."
-        )
+        return f"{env}\n\nError: provide `text`, `gcs_uri`, `image`, or `csv_path` for Vertex predict."
 
     classifier = TextClassifier(model_path)
     from edge_train.evaluate import format_inference_environment
@@ -1366,7 +1375,18 @@ def _exec_label_predictions(arguments: dict) -> str:
 
 
 _CORALFLOW_CLI_CMDS = frozenset(
-    {"agent", "init", "train", "validate", "deploy", "monitor", "cost", "predict", "simulate", "evaluate"}
+    {
+        "agent",
+        "init",
+        "train",
+        "validate",
+        "deploy",
+        "monitor",
+        "cost",
+        "predict",
+        "simulate",
+        "evaluate",
+    }
 )
 
 # Long-running CLI subcommands stream stdout instead of blocking silently.

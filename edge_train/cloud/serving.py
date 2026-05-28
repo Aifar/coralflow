@@ -190,8 +190,12 @@ class VertexAutoMLPredictor:
     def predict_batch(self, payloads: list[Any]) -> list[tuple[str, float]]:
         if not payloads:
             return []
-        instances = [self.build_instance(p) for p in payloads]
-        return [(label, conf) for label, conf, _ in self._predict_instances(instances)]
+        # Send images one at a time (online endpoint rejects multi-image batches)
+        results = []
+        for p in payloads:
+            label, conf = self.predict(p)
+            results.append((label, conf))
+        return results
 
 
 class VertexTabularPredictor(VertexAutoMLPredictor):
@@ -209,14 +213,22 @@ class VertexImagePredictor(VertexAutoMLPredictor):
     def build_instance(self, payload: str) -> dict[str, Any]:
         source = str(payload).strip()
         if source.startswith("gs://"):
+            from google.cloud import storage
+
+            bucket_name, blob_path = source.replace("gs://", "").split("/", 1)
+            bucket = storage.Client().get_bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+            img_bytes = blob.download_as_bytes()
+            b64 = base64.b64encode(img_bytes).decode("utf-8")
             mime, _ = mimetypes.guess_type(source)
-            return {"gcsUri": source, "mimeType": mime or "image/jpeg"}
+            return {"content": b64, "mimeType": mime or "image/png"}
         path = Path(source)
         if not path.is_file():
             raise FileNotFoundError(f"Image not found: {source}")
         mime, _ = mimetypes.guess_type(str(path))
-        content = base64.b64encode(path.read_bytes()).decode("utf-8")
-        return {"content": content, "mimeType": mime or "image/jpeg"}
+        img_bytes = path.read_bytes()
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        return {"content": b64, "mimeType": mime or "image/jpeg"}
 
 
 class VertexVideoPredictor(VertexAutoMLPredictor):

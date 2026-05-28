@@ -191,6 +191,13 @@ class TestVertexAutoMLPredictors:
             mocker,
             [{"classes": ["dog"], "scores": [0.7]}],
         )
+        mock_storage = mocker.patch("google.cloud.storage.Client")
+        bucket = mocker.MagicMock()
+        blob = mocker.MagicMock()
+        blob.download_as_bytes.return_value = b"\x89PNG fake image bytes"
+        bucket.blob.return_value = blob
+        mock_storage.return_value.get_bucket.return_value = bucket
+
         predictor = VertexImagePredictor(
             "projects/p/locations/us-central1/endpoints/2",
             project="p",
@@ -198,8 +205,12 @@ class TestVertexAutoMLPredictors:
         )
         label, _ = predictor.predict("gs://bucket/dog.png")
         assert label == "dog"
+        mock_storage.return_value.get_bucket.assert_called_once_with("bucket")
+        bucket.blob.assert_called_once_with("dog.png")
         instances = endpoint.predict.call_args.kwargs["instances"]
-        assert instances[0]["gcsUri"] == "gs://bucket/dog.png"
+        assert "content" in instances[0]
+        assert base64.b64decode(instances[0]["content"])
+        assert instances[0]["mimeType"] == "image/png"
 
     def test_video_requires_gcs(self, mocker):
         self._mock_endpoint(mocker, [{"classes": ["action"], "scores": [0.6]}])
