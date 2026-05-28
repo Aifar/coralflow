@@ -85,7 +85,11 @@ def _ensure_phoenix_registered(arize_config) -> bool:
 
 
 def _create_prediction_span(
-    text: str, predicted_label: str, confidence: float, all_probs: dict[str, float]
+    text: str,
+    predicted_label: str,
+    confidence: float,
+    all_probs: dict[str, float],
+    source: str = "local",
 ):
     """Create an OpenInference span for a single prediction."""
     try:
@@ -113,6 +117,7 @@ def _create_prediction_span(
                     {
                         "model_type": "text-classifier",
                         "num_classes": len(all_probs),
+                        "inference_source": source,
                     }
                 ),
             )
@@ -128,6 +133,7 @@ def log_prediction(
     all_probs: dict[str, float],
     ground_truth: str | None = None,
     create_span: bool = False,
+    source: str = "local",
 ):
     """Append a prediction to the JSON lines log file. Optionally create an OTEL span."""
     entry = {
@@ -136,6 +142,7 @@ def log_prediction(
         "predicted_label": predicted_label,
         "confidence": round(confidence, 4),
         "all_probs": {k: round(v, 4) for k, v in all_probs.items()},
+        "source": source,
     }
     if ground_truth is not None:
         entry["ground_truth"] = ground_truth
@@ -146,4 +153,6 @@ def log_prediction(
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     if create_span:
-        _create_prediction_span(text, predicted_label, confidence, all_probs)
+        _create_prediction_span(
+            text, predicted_label, confidence, all_probs, source=source
+        )

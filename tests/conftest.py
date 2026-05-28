@@ -36,6 +36,14 @@ def _isolated_training_history(monkeypatch, tmp_path):
     """Keep training history out of the user's home directory during tests."""
     path = tmp_path / "training_history.json"
     monkeypatch.setenv("CORALFLOW_TRAINING_HISTORY_PATH", str(path))
+    dep = tmp_path / "deployments.json"
+    monkeypatch.setenv("CORALFLOW_DEPLOYMENTS_PATH", str(dep))
+    for key in (
+        "PHOENIX_API_KEY",
+        "PHOENIX_COLLECTOR_ENDPOINT",
+        "PHOENIX_PROJECT_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture

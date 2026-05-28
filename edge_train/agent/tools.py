@@ -864,6 +864,28 @@ def _exec_check_monitoring() -> str:
         lines.append(
             "Open the dashboard to see traces, latency, and prediction distributions."
         )
+        lines.append("")
+        lines.append("**Inference paths (both send Phoenix spans when configured):**")
+        lines.append("- Local/edge: `coralflow predict --model <SavedModel>`")
+        lines.append(
+            "- Vertex: `coralflow predict --endpoint projects/.../endpoints/ID`"
+        )
+
+        from edge_train.deployments import DeploymentRegistry
+
+        deployments = DeploymentRegistry.load().records[:3]
+        if deployments:
+            lines.append("")
+            lines.append("**Recent deployments:**")
+            for dep in deployments:
+                if dep.target == "vertex" and dep.endpoint_name:
+                    lines.append(
+                        f"- Vertex `{dep.endpoint_name}` (model `{dep.model_path}`)"
+                    )
+                elif dep.target == "edge":
+                    lines.append(
+                        f"- Edge device `{dep.device_id}` (model `{dep.model_path}`)"
+                    )
         lines.append("Use `coralflow monitor --dashboard` to open in browser.")
     else:
         lines.append("  Phoenix: **not configured**")

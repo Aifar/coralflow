@@ -132,7 +132,7 @@ class TestTrainCommand:
             return_value="projects/test/locations/us-central1/tuningJobs/1",
         )
         mocker.patch(
-            "edge_train.cloud.poll_job",
+            "edge_train.cloud.training_wait.poll_job_scheduled",
             return_value={"model_path": "projects/test/tunedModels/1", "accuracy": 0.0},
         )
         mocker.patch(
@@ -148,6 +148,52 @@ class TestTrainCommand:
         assert "Modality: text" in result.output
         assert "Staging bucket: gs://test-bucket" in result.output
         assert mock_submit.called
+
+    def test_train_cloud_detach_skips_poll(self, runner, mocker, monkeypatch):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        mocker.patch(
+            "edge_train.cloud.submit_automl_job",
+            return_value="projects/test/locations/us-central1/tuningJobs/1",
+        )
+        mock_poll = mocker.patch("edge_train.cloud.training_wait.poll_job_scheduled")
+        mocker.patch(
+            "edge_train.config.ensure_gcp_credentials", return_value=(True, "")
+        )
+
+        result = runner.invoke(
+            train,
+            ["-d", "builtin:urgent", "--cloud", "--detach"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Estimated duration" in result.output
+        assert "Exiting without waiting" in result.output
+        assert not mock_poll.called
+
+    def test_train_cloud_poll_every_uses_scheduled(self, runner, mocker, monkeypatch):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        mocker.patch(
+            "edge_train.cloud.submit_automl_job",
+            return_value="projects/test/locations/us-central1/tuningJobs/1",
+        )
+        mock_poll = mocker.patch(
+            "edge_train.cloud.training_wait.poll_job_scheduled",
+            return_value={"model_path": "projects/test/tunedModels/1", "accuracy": 0.0},
+        )
+        mocker.patch(
+            "edge_train.config.ensure_gcp_credentials", return_value=(True, "")
+        )
+
+        result = runner.invoke(
+            train,
+            ["-d", "builtin:urgent", "--cloud", "--poll-every", "15", "--timeout", "1"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Scheduled monitoring" in result.output
+        assert "checking every 15 minutes" in result.output
+        mock_poll.assert_called_once()
+        assert mock_poll.call_args.kwargs.get("interval_min") == 15
 
     def test_train_builtin_resolves_modality_local(self, runner, tmp_path):
         out = tmp_path / "model"
@@ -339,7 +385,32 @@ class TestDeployCommand:
         tflite.write_bytes(b"fake model")
         result = runner.invoke(deploy, ["--model", str(tflite)])
         assert result.exit_code != 0
-        assert "device" in result.output.lower()
+        assert "edge" in result.output.lower() or "cloud" in result.output.lower()
+
+    def test_deploy_vertex_success(self, runner, monkeypatch, mocker):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        mocker.patch(
+            "edge_train.cloud.serving.deploy_model_to_vertex",
+            return_value=mocker.MagicMock(
+                model_path="projects/test/locations/us/models/1",
+                endpoint_name="projects/test/locations/us/endpoints/9",
+                deployed_model_id="dm-1",
+            ),
+        )
+        result = runner.invoke(
+            deploy,
+            [
+                "--cloud",
+                "-m",
+                "projects/test/locations/us/models/1",
+                "--modality",
+                "text",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "endpoints/9" in result.output
+        assert "Phoenix" in result.output
 
     def test_deploy_success(self, runner, tmp_path, monkeypatch):
         from edge_train.edge.deploy import DeployResult
@@ -384,8 +455,32 @@ class TestPredictCommand:
         result = runner.invoke(predict, ["--help"])
         assert result.exit_code == 0
         assert "--model" in result.output
+        assert "--endpoint" in result.output
         assert "--text" in result.output
         assert "--csv" in result.output
+
+    def test_vertex_predict(self, runner, mocker, monkeypatch):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        mock_predictor = mocker.MagicMock()
+        mock_predictor.predict.return_value = ("urgent", 0.95)
+        mock_predictor.predict_proba.return_value = {"urgent": 0.95}
+        mocker.patch(
+            "edge_train.cli.predict._load_vertex_predictor",
+            return_value=mock_predictor,
+        )
+
+        result = runner.invoke(
+            predict,
+            [
+                "--endpoint",
+                "projects/test/locations/us/endpoints/1",
+                "--text",
+                "urgent meeting",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Predicted: urgent" in result.output
 
     def test_single_prediction(self, runner, sample_text_csv, tmp_path):
         from edge_train.trainer import train_text_classifier

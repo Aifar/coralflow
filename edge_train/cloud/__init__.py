@@ -14,6 +14,12 @@ from edge_train.cloud.publisher_models import (
     list_publisher_models,
     resolve_finetune_base_model,
 )
+from edge_train.cloud.serving import (
+    VertexTextPredictor,
+    deploy_model_to_vertex,
+    is_vertex_endpoint,
+    is_vertex_resource,
+)
 from edge_train.cloud.router import (
     CloudTrainingMethod,
     CloudTrainingPlan,
@@ -35,6 +41,10 @@ __all__ = [
     "poll_job",
     "resolve_finetune_base_model",
     "submit_automl_job",
+    "deploy_model_to_vertex",
+    "is_vertex_resource",
+    "is_vertex_endpoint",
+    "VertexTextPredictor",
     "_upload_to_gcs",
 ]
 

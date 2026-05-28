@@ -46,6 +46,18 @@ from edge_train.config import load_config
     default=False,
     help="Train even if the same dataset/config was trained before",
 )
+@click.option(
+    "--detach",
+    is_flag=True,
+    default=False,
+    help="Submit cloud job and exit without waiting (cloud only)",
+)
+@click.option(
+    "--poll-every",
+    type=int,
+    default=None,
+    help="Check cloud job status every N minutes until complete or timeout (cloud only)",
+)
 def train(
     dataset: str,
     modality: str | None,
@@ -56,6 +68,8 @@ def train(
     cloud: bool,
     base_model: str | None,
     force: bool,
+    detach: bool,
+    poll_every: int | None,
 ):
     """Train a model — local by default, or Vertex AI with --cloud.
 
@@ -98,6 +112,8 @@ def train(
             train_cfg,
             base_model=base_model,
             force=force,
+            detach=detach,
+            poll_every=poll_every,
         )
     else:
         _train_local(
@@ -133,14 +149,24 @@ def _train_cloud(
     train_cfg,
     base_model=None,
     force=False,
+    detach=False,
+    poll_every=None,
 ):
     """Vertex AI cloud training with automatic service routing."""
+    import sys
+
     from edge_train.cloud import (
         cloud_modality_supported,
         describe_finetune_base_model,
         plan_cloud_training,
         submit_automl_job,
-        poll_job,
+    )
+    from edge_train.cloud.training_wait import (
+        DEFAULT_SCHEDULED_POLL_MIN,
+        format_detach_message,
+        format_post_submit_guidance,
+        poll_job_scheduled,
+        resolve_wait_strategy,
     )
     from edge_train.training_history import (
         TrainingHistory,
@@ -197,7 +223,6 @@ def _train_cloud(
     if action == "resume_running" and existing and existing.job_name:
         click.echo(format_duplicate_message(action, existing))
         job_name = existing.job_name
-        click.echo(f"  Monitoring existing job: {job_name}")
     else:
         click.echo(f"  Submitting {plan.label} job to Vertex AI...")
         try:
@@ -233,15 +258,40 @@ def _train_cloud(
             )
         )
 
-    if action != "resume_running":
-        click.echo(f"  Job submitted: {job_name}")
-    click.echo(f"  Training typically takes 5-30 minutes...")
+    resumed = action == "resume_running"
+
+    for line in format_post_submit_guidance(plan, job_name, resumed=resumed):
+        click.echo(line)
+
+    try:
+        wait_strategy = resolve_wait_strategy(
+            detach=detach,
+            poll_every=poll_every,
+            interactive=sys.stdin.isatty(),
+        )
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if wait_strategy == "detach":
+        click.echo(format_detach_message(plan))
+        return
+
+    interval_min = poll_every or DEFAULT_SCHEDULED_POLL_MIN
+    click.echo(
+        f"  Scheduled monitoring: checking every {interval_min} minutes "
+        f"(up to {min(timeout, train_cfg.training_timeout_min)} min)."
+    )
 
     timeout_min = min(timeout, train_cfg.training_timeout_min)
     deadline = time.time() + timeout_min * 60
 
     try:
-        result = poll_job(job_name, deadline=deadline)
+        result = poll_job_scheduled(
+            job_name,
+            interval_min=interval_min,
+            deadline=deadline,
+        )
     except TimeoutError:
         history.update(fingerprint, status="timeout")
         click.echo(
@@ -269,6 +319,15 @@ def _train_cloud(
     )
     click.echo(f"  Model saved to: {result.get('model_path', 'unknown')}")
     click.echo(f"  Evaluation accuracy: {result.get('accuracy', '?')}")
+
+    from edge_train.deployments import format_phoenix_monitoring_hint
+
+    model_path = result.get("model_path", "")
+    click.echo(format_phoenix_monitoring_hint())
+    if model_path.startswith("projects/"):
+        click.echo(
+            f"  Vertex deploy: coralflow deploy --cloud -m {model_path} --modality {plan.modality}"
+        )
 
 
 def _train_local(
