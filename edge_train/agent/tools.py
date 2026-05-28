@@ -867,9 +867,11 @@ def _exec_check_monitoring() -> str:
         lines.append("")
         lines.append("**Inference paths (both send Phoenix spans when configured):**")
         lines.append("- Local/edge: `coralflow predict --model <SavedModel>`")
-        lines.append('- Vertex text: `coralflow predict --endpoint <id> --text "..."`')
         lines.append(
-            "- Vertex AutoML: add `--modality table|image|video` with --csv, --image, or --gcs-uri"
+            "- Vertex text: `coralflow simulate --endpoint <id>` (smoke test → Phoenix traces)"
+        )
+        lines.append(
+            "- Vertex AutoML: `coralflow simulate --endpoint <id> --modality table|image|video`"
         )
 
         from edge_train.deployments import DeploymentRegistry

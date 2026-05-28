@@ -105,22 +105,22 @@ def format_phoenix_monitoring_hint(
         mod = modality.lower().strip()
         if mod == "table":
             lines.append(
-                f"    3. coralflow predict --endpoint {endpoint} --modality table --csv rows.csv"
+                f"    3. coralflow simulate --endpoint {endpoint} --modality table"
             )
         elif mod == "image":
             lines.append(
-                f"    3. coralflow predict --endpoint {endpoint} --modality image --image path.jpg"
+                f"    3. coralflow simulate --endpoint {endpoint} --modality image --image path.jpg"
             )
         elif mod == "video":
             lines.append(
-                f"    3. coralflow predict --endpoint {endpoint} --modality video --gcs-uri gs://..."
+                f"    3. coralflow simulate --endpoint {endpoint} --modality video --gcs-uri gs://..."
             )
         else:
-            lines.append(f'    3. coralflow predict --endpoint {endpoint} --text "..."')
+            lines.append(f"    3. coralflow simulate --endpoint {endpoint}")
     elif model_path:
-        lines.append(f'    3. coralflow predict --model {model_path} --text "..."')
+        lines.append(f"    3. coralflow simulate --model {model_path}")
     else:
-        lines.append("    3. coralflow predict --model <path> | --endpoint <vertex>")
+        lines.append("    3. coralflow simulate --model <path> | --endpoint <vertex>")
     lines.append("    4. coralflow monitor --dashboard")
-    lines.append("  Predictions log to prediction_log.jsonl and emit OTEL spans.")
+    lines.append("  Simulate sends sample predictions; traces appear in Phoenix.")
     return "\n".join(lines)

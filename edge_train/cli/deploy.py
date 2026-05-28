@@ -18,9 +18,7 @@ from edge_train.edge.registry import DeviceRegistry
     required=True,
     help="Local .tflite path (edge) or Vertex model resource name (with --cloud)",
 )
-@click.option(
-    "--device", "-d", default=None, help="Device ID from registry (edge only)"
-)
+@click.option("--device", "-d", default=None, help="Device ID from registry (edge only)")
 @click.option("--host", default=None, help="Device hostname or IP (edge only)")
 @click.option("--port", default=8080, type=int, help="Device HTTP port (edge only)")
 @click.option("--version", default=None, help="Model version string (edge only)")
@@ -31,9 +29,7 @@ from edge_train.edge.registry import DeviceRegistry
     help="Model modality",
 )
 @click.option("--timeout", default=30, type=int, help="Connection timeout in seconds")
-@click.option(
-    "--no-verify", is_flag=True, help="Skip checksum verification (edge only)"
-)
+@click.option("--no-verify", is_flag=True, help="Skip checksum verification (edge only)")
 @click.option("--registry", default=None, help="Path to device registry JSON file")
 @click.option(
     "--cloud",
@@ -51,6 +47,19 @@ from edge_train.edge.registry import DeviceRegistry
     default=None,
     help="Vertex deployed model display name",
 )
+@click.option(
+    "--simulate",
+    is_flag=True,
+    default=False,
+    help="Run Phoenix smoke-test predictions after successful deploy",
+)
+@click.option(
+    "--simulate-count",
+    default=5,
+    show_default=True,
+    type=int,
+    help="Number of sample predictions when using --simulate",
+)
 def deploy(
     model: str,
     device: str | None,
@@ -64,6 +73,8 @@ def deploy(
     cloud: bool,
     machine_type: str | None,
     display_name: str | None,
+    simulate: bool,
+    simulate_count: int,
 ):
     """Deploy a model for inference.
 
@@ -73,7 +84,14 @@ def deploy(
     Use coralflow predict --endpoint <endpoint> for Phoenix-monitored inference.
     """
     if cloud:
-        _deploy_vertex(model, modality, machine_type, display_name)
+        _deploy_vertex(
+            model,
+            modality,
+            machine_type,
+            display_name,
+            simulate=simulate,
+            simulate_count=simulate_count,
+        )
         return
 
     if not device and not host:
@@ -141,6 +159,13 @@ def deploy(
         from edge_train.deployments import format_phoenix_monitoring_hint
 
         click.echo(format_phoenix_monitoring_hint(model_path=model))
+        _print_simulate_hint(model=_edge_simulate_model_hint(), modality=modality)
+        if simulate:
+            _run_post_deploy_simulate(
+                model=_edge_simulate_model_hint(),
+                modality=modality,
+                count=simulate_count,
+            )
     else:
         click.echo(" failed.")
         click.echo(f"  {result.error}", err=True)
@@ -152,6 +177,9 @@ def _deploy_vertex(
     modality: str,
     machine_type: str | None,
     display_name: str | None,
+    *,
+    simulate: bool = False,
+    simulate_count: int = 5,
 ) -> None:
     from edge_train.cloud.serving import deploy_model_to_vertex, is_vertex_resource
     from edge_train.config import GCPConfig, load_config
@@ -208,3 +236,69 @@ def _deploy_vertex(
             modality=modality,
         )
     )
+    _print_simulate_hint(endpoint=result.endpoint_name, modality=modality)
+    if simulate:
+        _run_post_deploy_simulate(
+            endpoint=result.endpoint_name,
+            modality=modality,
+            count=simulate_count,
+        )
+
+
+def _edge_simulate_model_hint() -> str | None:
+    from edge_train.simulate import guess_local_saved_model
+
+    return guess_local_saved_model()
+
+
+def _print_simulate_hint(
+    *,
+    endpoint: str = "",
+    model: str | None = None,
+    modality: str = "text",
+) -> None:
+    from edge_train.simulate import format_simulate_command
+
+    if endpoint:
+        cmd = format_simulate_command(
+            endpoint=endpoint,
+            modality=modality,
+        )
+    elif model:
+        cmd = format_simulate_command(model=model)
+    else:
+        cmd = "coralflow simulate --model <SavedModel> | --endpoint <vertex>"
+    click.echo(f"  Simulate (Phoenix smoke test): {cmd}")
+
+
+def _run_post_deploy_simulate(
+    *,
+    endpoint: str = "",
+    model: str | None = None,
+    modality: str = "text",
+    count: int = 5,
+) -> None:
+    from edge_train.simulate import run_simulation
+
+    if not endpoint and not model:
+        click.echo(
+            "  Simulate skipped: no local SavedModel found. "
+            "Run coralflow simulate --endpoint <id> manually.",
+            err=True,
+        )
+        return
+
+    click.echo("  Running post-deploy simulate...")
+    try:
+        result = run_simulation(
+            endpoint=endpoint or None,
+            model=model,
+            modality=modality if endpoint else None,
+            count=count,
+        )
+    except Exception as exc:
+        click.echo(f"  Simulate failed: {exc}", err=True)
+        return
+
+    click.echo(f"  Simulate sent {result.count} predictions to Phoenix.")
+    click.echo(f"  Dashboard: {result.dashboard_url}")

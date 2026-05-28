@@ -49,5 +49,5 @@ class TestDeploymentRegistry:
         hint = format_phoenix_monitoring_hint(
             endpoint="projects/p/locations/us/endpoints/9"
         )
-        assert "predict --endpoint" in hint
+        assert "predict --endpoint" in hint or "simulate --endpoint" in hint
         assert "monitor --dashboard" in hint

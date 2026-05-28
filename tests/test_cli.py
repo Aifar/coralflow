@@ -15,6 +15,7 @@ from edge_train.cli.monitor import monitor
 from edge_train.cli.deploy import deploy
 from edge_train.cli.train import train
 from edge_train.cli.predict import predict
+from edge_train.cli.simulate import simulate
 
 
 @pytest.fixture
@@ -411,6 +412,44 @@ class TestDeployCommand:
         assert result.exit_code == 0, result.output
         assert "endpoints/9" in result.output
         assert "Phoenix" in result.output
+        assert "coralflow simulate" in result.output
+
+    def test_deploy_vertex_with_simulate(self, runner, monkeypatch, mocker):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"
+        )
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        mocker.patch(
+            "edge_train.cloud.serving.deploy_model_to_vertex",
+            return_value=mocker.MagicMock(
+                model_path="projects/test/locations/us/models/1",
+                endpoint_name="projects/test/locations/us/endpoints/9",
+                deployed_model_id="dm-1",
+            ),
+        )
+        mock_sim = mocker.patch(
+            "edge_train.simulate.run_simulation",
+            return_value=mocker.MagicMock(
+                count=5,
+                dashboard_url="https://example.com",
+            ),
+        )
+        result = runner.invoke(
+            deploy,
+            [
+                "--cloud",
+                "-m",
+                "projects/test/locations/us/models/1",
+                "--modality",
+                "text",
+                "--simulate",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert mock_sim.called
+        assert "Simulate sent 5 predictions" in result.output
 
     def test_deploy_success(self, runner, tmp_path, monkeypatch):
         from edge_train.edge.deploy import DeployResult
@@ -577,6 +616,38 @@ class TestPredictCommand:
         result = runner.invoke(predict, ["-m", str(model_path)])
         assert result.exit_code != 0
         assert "Error" in result.output
+
+
+class TestSimulateCommand:
+    def test_simulate_help(self, runner):
+        result = runner.invoke(simulate, ["--help"])
+        assert result.exit_code == 0
+        assert "--endpoint" in result.output
+        assert "--model" in result.output
+        assert "--count" in result.output
+
+    def test_simulate_cli(self, runner, mocker, monkeypatch):
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"
+        )
+        monkeypatch.setenv("PHOENIX_API_KEY", "test-key")
+        mocker.patch(
+            "edge_train.cli.simulate.run_simulation",
+            return_value=mocker.MagicMock(
+                count=5,
+                log_path="/tmp/log.jsonl",
+                phoenix_active=True,
+                dashboard_url="https://example.com",
+                project_name="edge-train",
+            ),
+        )
+        result = runner.invoke(
+            simulate,
+            ["--endpoint", "projects/test/locations/us-central1/endpoints/1"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Sent 5 sample predictions" in result.output
+        assert "Dashboard:" in result.output
 
 
 class TestMonitorRetrain:

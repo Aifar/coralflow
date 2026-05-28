@@ -328,6 +328,9 @@ def _train_cloud(
         click.echo(
             f"  Vertex deploy: coralflow deploy --cloud -m {model_path} --modality {plan.modality}"
         )
+        click.echo(
+            f"  After deploy: coralflow deploy --cloud -m {model_path} --modality {plan.modality} --simulate"
+        )
 
 
 def _train_local(
@@ -401,8 +404,9 @@ def _train_local(
 
         click.echo(f"  Model saved to: {model_path}")
         click.echo(
-            f"  Next: edge-train validate --model {model_path} --output model.tflite"
+            f"  Next: coralflow validate --model {model_path} --output model.tflite"
         )
+        click.echo(f"  Then: coralflow simulate --model {model_path}")
     else:
         click.echo(
             f"  Local training for '{modality}' is not yet supported. "
