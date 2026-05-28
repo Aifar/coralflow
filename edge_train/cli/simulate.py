@@ -82,6 +82,15 @@ def simulate(
         )
         sys.exit(1)
 
+    from edge_train.inference.phoenix import (
+        apply_phoenix_prepare,
+        prepare_phoenix_for_inference,
+    )
+
+    phoenix_active = apply_phoenix_prepare(
+        prepare_phoenix_for_inference(required=True, interactive=True)
+    )
+
     click.echo("  Running Phoenix smoke-test predictions...")
     try:
         result = run_simulation(
@@ -93,6 +102,7 @@ def simulate(
             image=image,
             gcs_uri=gcs_uri,
             log_path=log_path or train_cfg.prediction_log_path,
+            phoenix_active=phoenix_active,
         )
     except ValueError as exc:
         click.echo(f"  Error: {exc}", err=True)

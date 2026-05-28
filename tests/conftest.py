@@ -33,16 +33,14 @@ def sample_text_csv(temp_dir):
 
 @pytest.fixture(autouse=True)
 def _isolated_training_history(monkeypatch, tmp_path):
-    """Keep training history out of the user's home directory during tests."""
+    """Keep training history and agent state out of the user's home during tests."""
     path = tmp_path / "training_history.json"
     monkeypatch.setenv("CORALFLOW_TRAINING_HISTORY_PATH", str(path))
     dep = tmp_path / "deployments.json"
     monkeypatch.setenv("CORALFLOW_DEPLOYMENTS_PATH", str(dep))
-    for key in (
-        "PHOENIX_API_KEY",
-        "PHOENIX_COLLECTOR_ENDPOINT",
-        "PHOENIX_PROJECT_NAME",
-    ):
+    monkeypatch.setenv("EDGE_PREDICTION_LOG_PATH", str(tmp_path / "prediction_log.jsonl"))
+    monkeypatch.setattr("edge_train.agent.STATE_FILE", tmp_path / "agent_state.json")
+    for key in ("PHOENIX_API_KEY", "PHOENIX_COLLECTOR_ENDPOINT", "PHOENIX_PROJECT_NAME"):
         monkeypatch.delenv(key, raising=False)
 
 

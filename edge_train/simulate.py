@@ -191,6 +191,7 @@ def run_simulation(
     image: str | None = None,
     gcs_uri: str | None = None,
     log_path: str | None = None,
+    phoenix_active: bool | None = None,
 ) -> SimulationResult:
     """Run sample predictions and emit Phoenix OTEL spans for each."""
     from edge_train.config import load_config
@@ -204,12 +205,17 @@ def run_simulation(
     _, arize, train_cfg, _ = load_config()
     log_file = log_path or train_cfg.prediction_log_path
 
-    phoenix_active = False
-    if arize.is_valid():
-        phoenix_active, phoenix_err = prepare_phoenix_for_inference(required=True)
-        if not phoenix_active:
-            raise RuntimeError(phoenix_err)
-    else:
+    if phoenix_active is None:
+        if not arize.is_valid():
+            raise RuntimeError(
+                "Phoenix not configured. Set PHOENIX_COLLECTOR_ENDPOINT "
+                "(and PHOENIX_API_KEY for Phoenix Cloud) before simulate."
+            )
+        prep = prepare_phoenix_for_inference(required=True, interactive=False)
+        if prep.abort:
+            raise RuntimeError(prep.message)
+        phoenix_active = prep.active
+    elif phoenix_active and not arize.is_valid():
         raise RuntimeError(
             "Phoenix not configured. Set PHOENIX_COLLECTOR_ENDPOINT "
             "(and PHOENIX_API_KEY for Phoenix Cloud) before simulate."

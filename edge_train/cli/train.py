@@ -58,6 +58,12 @@ from edge_train.config import load_config
     default=None,
     help="Check cloud job status every N minutes until complete or timeout (cloud only)",
 )
+@click.option(
+    "--purpose",
+    "-p",
+    default="",
+    help="Human-readable project name saved in history (e.g. neu_cls_defect_classifier_v3)",
+)
 def train(
     dataset: str,
     modality: str | None,
@@ -70,6 +76,7 @@ def train(
     force: bool,
     detach: bool,
     poll_every: int | None,
+    purpose: str,
 ):
     """Train a model — local by default, or Vertex AI with --cloud.
 
@@ -114,6 +121,7 @@ def train(
             force=force,
             detach=detach,
             poll_every=poll_every,
+            purpose=purpose,
         )
     else:
         _train_local(
@@ -124,6 +132,7 @@ def train(
             out_dir,
             num_epochs,
             force=force,
+            purpose=purpose,
         )
 
 
@@ -151,6 +160,7 @@ def _train_cloud(
     force=False,
     detach=False,
     poll_every=None,
+    purpose="",
 ):
     """Vertex AI cloud training with automatic service routing."""
     import sys
@@ -197,6 +207,8 @@ def _train_cloud(
     click.echo(f"  Cloud method: {plan.label} ({plan.status})")
     click.echo(f"  Rationale: {plan.reason}")
     click.echo(f"  Dataset: {dataset_label}")
+    if purpose:
+        click.echo(f"  Project: {purpose}")
     if dataset_label != dataset_path:
         click.echo(f"  Resolved path: {dataset_path}")
     click.echo(f"  GCP Project: {gcp.project_id}")
@@ -251,6 +263,7 @@ def _train_cloud(
                 base_model=(
                     finetune_model if plan.method.value == "gemini_finetune" else ""
                 ),
+                purpose=purpose or "",
                 job_name=job_name,
                 status="running",
                 project_id=gcp.project_id,
@@ -316,9 +329,15 @@ def _train_cloud(
         model_path=result.get("model_path", ""),
         completed_at=datetime.now(timezone.utc).isoformat(),
         error="",
+        purpose=purpose or "",
     )
     click.echo(f"  Model saved to: {result.get('model_path', 'unknown')}")
     click.echo(f"  Evaluation accuracy: {result.get('accuracy', '?')}")
+
+    from edge_train.agent import AgentState
+    from edge_train.agent.context import sync_agent_context
+
+    sync_agent_context(AgentState.load())
 
     from edge_train.deployments import format_phoenix_monitoring_hint
 
@@ -334,7 +353,14 @@ def _train_cloud(
 
 
 def _train_local(
-    dataset_label, dataset_path, modality, target, output_dir, epochs, force=False
+    dataset_label,
+    dataset_path,
+    modality,
+    target,
+    output_dir,
+    epochs,
+    force=False,
+    purpose="",
 ):
     """Local training path — no cloud required."""
     from edge_train.training_history import (
@@ -361,6 +387,8 @@ def _train_local(
 
     click.echo(f"  Modality: {modality}")
     click.echo(f"  Dataset: {dataset_label}")
+    if purpose:
+        click.echo(f"  Project: {purpose}")
     if dataset_label != dataset_path:
         click.echo(f"  Resolved CSV: {dataset_path}")
     click.echo("  Training locally...")
@@ -396,6 +424,7 @@ def _train_local(
                 target_column=target or "",
                 output_dir=output_dir,
                 epochs=epochs,
+                purpose=purpose or "",
                 status="succeeded",
                 model_path=model_path,
                 completed_at=datetime.now(timezone.utc).isoformat(),
@@ -407,6 +436,11 @@ def _train_local(
             f"  Next: coralflow validate --model {model_path} --output model.tflite"
         )
         click.echo(f"  Then: coralflow simulate --model {model_path}")
+
+        from edge_train.agent import AgentState
+        from edge_train.agent.context import sync_agent_context
+
+        sync_agent_context(AgentState.load())
     else:
         click.echo(
             f"  Local training for '{modality}' is not yet supported. "

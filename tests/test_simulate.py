@@ -2,6 +2,7 @@
 
 import pytest
 
+from edge_train.inference.phoenix import PhoenixPrepareResult
 from edge_train.simulate import (
     DEFAULT_TEXT_SAMPLES,
     format_simulate_command,
@@ -69,7 +70,7 @@ class TestRunSimulation:
         )
         mocker.patch(
             "edge_train.inference.phoenix.prepare_phoenix_for_inference",
-            return_value=(True, ""),
+            return_value=PhoenixPrepareResult(True, "", False),
         )
 
         result = run_simulation(model=model_path, count=2)
@@ -96,7 +97,7 @@ class TestRunSimulation:
         )
         mocker.patch(
             "edge_train.inference.phoenix.prepare_phoenix_for_inference",
-            return_value=(True, ""),
+            return_value=PhoenixPrepareResult(True, "", False),
         )
 
         result = run_simulation(

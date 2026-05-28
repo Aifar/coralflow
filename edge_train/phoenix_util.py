@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Callable
 from urllib.parse import urlparse
 
 
@@ -163,6 +167,100 @@ def format_phoenix_start_instructions(status: PhoenixStatus) -> str:
     return "\n".join(lines)
 
 
+def local_phoenix_port(collector_endpoint: str) -> int:
+    parsed = urlparse(collector_endpoint)
+    if parsed.port:
+        return parsed.port
+    return 6006
+
+
+def wait_for_phoenix_running(
+    arize_config,
+    *,
+    timeout: float = 90.0,
+    interval: float = 2.0,
+) -> bool:
+    """Poll until Phoenix responds or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if check_phoenix_running(arize_config).reachable:
+            return True
+        time.sleep(interval)
+    return False
+
+
+def start_local_phoenix_process(collector_endpoint: str) -> subprocess.Popen:
+    """Start `phoenix serve` in the background for local collectors."""
+    if not shutil.which("phoenix"):
+        raise FileNotFoundError("phoenix")
+
+    port = local_phoenix_port(collector_endpoint)
+    return subprocess.Popen(
+        ["phoenix", "serve", "--host", "127.0.0.1", "--port", str(port)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def ensure_phoenix_ready_interactive(
+    arize_config,
+    *,
+    interactive: bool = True,
+    prompt_fn: Callable[[str], bool] | None = None,
+    echo_fn: Callable[[str], None] | None = None,
+) -> tuple[bool, str]:
+    """Check Phoenix; when local and down, ask to start before registering OTEL."""
+    if not arize_config.is_valid():
+        return False, ""
+
+    status = check_phoenix_running(arize_config)
+    if status.reachable:
+        return _register_phoenix(arize_config)
+
+    instructions = format_phoenix_start_instructions(status)
+
+    if status.is_local and interactive:
+        if not prompt_fn:
+            return False, instructions
+        if echo_fn:
+            echo_fn(instructions)
+
+        ask = (
+            "未检测到本地 Arize Phoenix 服务。是否现在启动 Phoenix？"
+            "（将运行 phoenix serve）"
+        )
+        if prompt_fn(ask):
+            if echo_fn:
+                echo_fn(f"正在启动本地 Phoenix（{status.dashboard_url}）…")
+            try:
+                start_local_phoenix_process(status.collector_endpoint)
+            except FileNotFoundError:
+                return (
+                    False,
+                    instructions
+                    + "\n\n未找到 `phoenix` 命令。请先运行：`pip install arize-phoenix`",
+                )
+            except Exception as exc:
+                return False, f"{instructions}\n\n启动 Phoenix 失败：{exc}"
+
+            if wait_for_phoenix_running(arize_config):
+                return _register_phoenix(arize_config)
+
+            return (
+                False,
+                "Phoenix 启动超时。请在另一终端运行 `phoenix serve` 后重试。"
+                "本次将继续执行，但不会发送 OTEL span。",
+            )
+
+        return (
+            False,
+            "已跳过启动 Phoenix。本次将继续执行，但不会发送 OTEL span。",
+        )
+
+    return False, instructions
+
+
 def _register_phoenix(arize_config) -> tuple[bool, str]:
     try:
         logging.getLogger(
@@ -194,14 +292,7 @@ def ensure_phoenix_ready(arize_config) -> tuple[bool, str]:
         (active, error_message) — active is True when spans can be sent.
         When not configured, returns (False, "") and prediction may proceed without OTEL.
     """
-    if not arize_config.is_valid():
-        return False, ""
-
-    status = check_phoenix_running(arize_config)
-    if not status.reachable:
-        return False, format_phoenix_start_instructions(status)
-
-    ok, err = _register_phoenix(arize_config)
-    if not ok:
-        return False, f"## Phoenix registration failed\n\n{err}"
-    return True, ""
+    return ensure_phoenix_ready_interactive(
+        arize_config,
+        interactive=False,
+    )

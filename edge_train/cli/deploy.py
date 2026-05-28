@@ -18,7 +18,9 @@ from edge_train.edge.registry import DeviceRegistry
     required=True,
     help="Local .tflite path (edge) or Vertex model resource name (with --cloud)",
 )
-@click.option("--device", "-d", default=None, help="Device ID from registry (edge only)")
+@click.option(
+    "--device", "-d", default=None, help="Device ID from registry (edge only)"
+)
 @click.option("--host", default=None, help="Device hostname or IP (edge only)")
 @click.option("--port", default=8080, type=int, help="Device HTTP port (edge only)")
 @click.option("--version", default=None, help="Model version string (edge only)")
@@ -29,7 +31,9 @@ from edge_train.edge.registry import DeviceRegistry
     help="Model modality",
 )
 @click.option("--timeout", default=30, type=int, help="Connection timeout in seconds")
-@click.option("--no-verify", is_flag=True, help="Skip checksum verification (edge only)")
+@click.option(
+    "--no-verify", is_flag=True, help="Skip checksum verification (edge only)"
+)
 @click.option("--registry", default=None, help="Path to device registry JSON file")
 @click.option(
     "--cloud",

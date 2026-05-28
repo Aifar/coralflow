@@ -626,7 +626,7 @@ class TestSimulateCommand:
         assert "--model" in result.output
         assert "--count" in result.output
 
-    def test_simulate_cli(self, runner, mocker, monkeypatch):
+    def test_simulate_cli(self, runner, mocker, monkeypatch, phoenix_reachable):
         monkeypatch.setenv(
             "PHOENIX_COLLECTOR_ENDPOINT", "https://example.com/v1/traces"
         )

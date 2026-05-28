@@ -138,18 +138,16 @@ def predict(
         sys.exit(1)
 
     from edge_train.inference.phoenix import (
-        echo_phoenix_exit_error,
+        apply_phoenix_prepare,
         prepare_phoenix_for_inference,
     )
 
     _, arize, train_cfg, _ = load_config()
     log_file = log_path or train_cfg.prediction_log_path
 
-    phoenix_active = False
-    if arize.is_valid():
-        phoenix_active, phoenix_err = prepare_phoenix_for_inference(required=True)
-        if not phoenix_active:
-            echo_phoenix_exit_error(phoenix_err)
+    phoenix_active = apply_phoenix_prepare(
+        prepare_phoenix_for_inference(required=arize.is_valid(), interactive=True)
+    )
 
     if endpoint:
         resolved_modality = _resolve_endpoint_modality(endpoint, modality)

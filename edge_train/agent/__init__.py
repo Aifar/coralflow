@@ -13,15 +13,24 @@ STATE_FILE = STATE_DIR / "agent_state.json"
 
 @dataclass
 class AgentState:
-    """Persistent agent state for resumability across sessions."""
+    """Persistent agent state — focused project context, not full chat history."""
 
+    training_purpose: str = ""
     dataset_path: str = ""
+    modality: str = ""
+    training_status: str = ""
     model_path: str | None = None
+    deployment_status: str = ""
+    endpoint_name: str | None = None
+    data_collection: str = ""
+    needs_retrain: bool = False
+    last_step: str = ""
+    updated_at: str = ""
+    # Legacy fields (kept for backward-compatible load)
     task_type: str = ""
     deployment_target: str | None = None
-    last_step: str = ""
-    created_at: str = ""
     conversation_summary: str = ""
+    created_at: str = ""
 
     def __post_init__(self):
         if not self.created_at:

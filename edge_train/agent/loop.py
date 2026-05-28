@@ -30,11 +30,18 @@ Guidelines:
 - **Training flow is mandatory: assess → choose → train**
 - When the user asks to train, you MUST first call `assess_resources` with the dataset path
 - After assessment, you MUST present the options and ask the user to choose (1 or 2)
-- When the user replies with only `1` or `2` after training options, call `train_model` for option 1; for option 2 use `run_shell` with `train --cloud ...` (auto-routed: Gemini SFT for text, AutoML Tabular/Image/Video otherwise)
+- When the user replies with only `1` or `2` after training options, call `train_model` for option 1; for option 2 use `run_shell` with `train --cloud ...` (auto-routed: Gemini SFT for text, AutoML Tabular/Image/Video otherwise). Always pass `--purpose <project_name>` when the user names the project (e.g. neu_cls_defect_classifier_v3).
+- **After cloud AutoML training succeeds**, present post-training options:
+  1. Export & deploy to edge (local TFLite path when available)
+  2. **Run predictions on the test set** — call `run_predictions` (NOT ad-hoc Python). Always show the inference environment (Vertex cloud vs local).
+  3. Validate model size & latency for edge deployment
+- For option 2 (test-set predictions): use `run_predictions` with `endpoint`, `modality`, and `test_jsonl` (e.g. `gs://coralflow/neu-cls/test.jsonl`). Equivalent CLI: `coralflow evaluate --endpoint ... --modality image --dataset ...`
+- **NEVER** use `run_shell` with inline Python (`google.cloud.aiplatform`, heredocs). Use `run_predictions`, `predict`, or CLI subcommands (`evaluate`, `simulate`, `deploy --cloud`) instead.
+- AutoML Image models deploy with **automatic_resources** on Vertex — do not pass machine_type to deploy.
 - For cloud **text** training (Gemini Fine-Tuning), always state which **publisher base model** will be fine-tuned (from `GCP_FINETUNE_MODEL`, default `gemini-2.0-flash-001`). Mention `coralflow models list` to see alternatives and `--base-model` / `GCP_FINETUNE_MODEL` to change it
 - Wait for the user's choice before calling `train_model` or suggesting cloud
-- Use `run_shell` for coralflow CLI subcommands (`train`, `predict`, `deploy`, `validate`, `monitor`, `cost`, `init`) when the user asks to run CLI-style commands
-- Prefer dedicated tools (`train_model`, `predict`, etc.) for the guided agent workflow; use `run_shell` when the user explicitly wants the CLI or passes CLI flags
+- Use `run_shell` for coralflow CLI subcommands (`train`, `predict`, `deploy`, `validate`, `monitor`, `cost`, `init`, `simulate`, `evaluate`) when the user asks to run CLI-style commands
+- Prefer dedicated tools (`train_model`, `run_predictions`, `predict`, etc.) for the guided agent workflow; use `run_shell` when the user explicitly wants the CLI or passes CLI flags
 - If local resources are insufficient, explain why and recommend cloud
 - When the user asks to train, first scan for datasets and present options
 - If no local dataset matches, recommend public datasets from the web
@@ -139,7 +146,7 @@ def _run_llm_turn(messages: list[dict], llm: "LLMClient", ui: CoralFlowUI) -> No
                     )
             else:
                 ui.tool_start(tc.name)
-            result = execute_tool(tc.name, tc.arguments, llm=llm)
+            result = execute_tool(tc.name, tc.arguments, llm=llm, ui=ui)
             messages.append(
                 {
                     "role": "tool",
@@ -175,11 +182,14 @@ def run_agent_loop(
     ]
 
     # Inject startup context
-    if state.conversation_summary:
+    from edge_train.agent.context import format_project_context
+
+    project_ctx = format_project_context(state)
+    if project_ctx:
         messages.append(
             {
                 "role": "system",
-                "content": f"Previous session summary: {state.conversation_summary}",
+                "content": f"Saved project context (resume from here):\n{project_ctx}",
             }
         )
     if scan_result:
@@ -241,13 +251,17 @@ def run_agent_loop(
         # Keep conversation bounded
         if len(messages) > 40:
             _trim_history(messages)
-            messages.insert(
-                1,
-                {
-                    "role": "system",
-                    "content": f"Previous session summary: {state.conversation_summary}",
-                },
-            )
+            from edge_train.agent.context import format_project_context
+
+            project_ctx = format_project_context(state)
+            if project_ctx:
+                messages.insert(
+                    1,
+                    {
+                        "role": "system",
+                        "content": f"Saved project context:\n{project_ctx}",
+                    },
+                )
 
 
 def _handle_slash_command(user_input: str, ui: CoralFlowUI) -> tuple[dict | None, str]:
@@ -292,13 +306,13 @@ def _handle_slash_command(user_input: str, ui: CoralFlowUI) -> tuple[dict | None
                 )
             result = "\n".join(lines)
     elif tool_name in ("scan_datasets", "get_status"):
-        result = execute_tool(tool_name, {})
+        result = execute_tool(tool_name, {}, ui=ui)
     else:
         shell_cmd = tool_args.get("command", "")
         ui.tool_start(tool_name, shell_cmd)
         if shell_cmd.split()[0] in ("train", "validate"):
             ui.info("Running CLI (may take several minutes) — live output below:")
-        result = execute_tool(tool_name, tool_args)
+        result = execute_tool(tool_name, tool_args, ui=ui)
 
     tool_call_id = f"call_{secrets.token_hex(12)}"
     tool_call_msg = {
@@ -342,18 +356,11 @@ sent to the LLM, which chooses tools (`train_model`, `run_shell`, etc.).""",
 
 
 def _save_and_exit(state, messages: list[dict], ui: CoralFlowUI):
-    """Summarize conversation, save state, and exit."""
-    recent = [
-        m
-        for m in messages[-10:]
-        if m.get("role") in ("user", "assistant") and m.get("content")
-    ]
-    summary = " | ".join(m["content"][:100] for m in recent[-5:]) if recent else ""
-    if summary:
-        state.conversation_summary = summary[:500]
-        state.last_step = "agent_session"
-    state.save()
-    ui.success("State saved. Goodbye!")
+    """Persist focused project context and exit."""
+    from edge_train.agent.context import sync_agent_context
+
+    sync_agent_context(state)
+    ui.success("Project context saved. Goodbye!")
 
 
 def _trim_history(messages: list[dict], max_messages: int = 30):

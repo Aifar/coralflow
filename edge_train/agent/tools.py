@@ -116,6 +116,10 @@ TOOLS: list[dict[str, Any]] = [
                         "type": "integer",
                         "description": "Number of training epochs (default: 10).",
                     },
+                    "purpose": {
+                        "type": "string",
+                        "description": "Project name to persist (e.g. neu_cls_defect_classifier_v3).",
+                    },
                 },
                 "required": ["dataset_path"],
             },
@@ -167,24 +171,81 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "predict",
-            "description": "Classify text using a trained model — single text or batch CSV.",
+            "description": (
+                "Run inference and log to prediction_log.jsonl + Phoenix. "
+                "Local text: model_path + text/csv. "
+                "Vertex: endpoint + modality (text|table|image|video) + text/features/image/gcs-uri/csv. "
+                "For full labeled test-set evaluation (e.g. 360 images), use run_predictions instead."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "model_path": {
                         "type": "string",
-                        "description": "Path to the SavedModel directory.",
+                        "description": "Local SavedModel directory (local inference only).",
+                    },
+                    "endpoint": {
+                        "type": "string",
+                        "description": "Vertex endpoint resource name (cloud inference).",
+                    },
+                    "modality": {
+                        "type": "string",
+                        "enum": ["text", "table", "image", "video"],
+                        "description": "Vertex modality (required with endpoint for non-text).",
                     },
                     "text": {
                         "type": "string",
-                        "description": "Single text input to classify.",
+                        "description": "Single text input (text modality).",
+                    },
+                    "gcs_uri": {
+                        "type": "string",
+                        "description": "GCS URI for image/video input (gs://...).",
+                    },
+                    "image": {
+                        "type": "string",
+                        "description": "Local image path (image modality).",
                     },
                     "csv_path": {
                         "type": "string",
                         "description": "CSV file for batch prediction.",
                     },
                 },
-                "required": ["model_path"],
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_predictions",
+            "description": (
+                "Evaluate a trained model on a labeled test set. "
+                "Always states the inference environment (Vertex cloud vs local). "
+                "For cloud AutoML image models: requires endpoint + test JSONL (gs:// or local). "
+                "Never use ad-hoc Python — this tool calls coralflow evaluate internally."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "endpoint": {
+                        "type": "string",
+                        "description": "Vertex endpoint resource name. Omit to use latest deployment from registry.",
+                    },
+                    "modality": {
+                        "type": "string",
+                        "enum": ["text", "table", "image", "video"],
+                        "description": "Inference modality (default: image for AutoML defect models).",
+                    },
+                    "test_jsonl": {
+                        "type": "string",
+                        "description": "Labeled test JSONL path, e.g. gs://coralflow/neu-cls/test.jsonl",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max rows to evaluate (default: all). Use 6 for a quick smoke test.",
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -284,7 +345,7 @@ def _read_dataset(path: str) -> tuple[list[str], list[dict], str | None, str | N
     return headers, rows, text_col, label_col
 
 
-def execute_tool(name: str, arguments: dict, llm=None) -> str:
+def execute_tool(name: str, arguments: dict, llm=None, ui=None) -> str:
     """Dispatch a tool call by name and return the result string."""
     try:
         if name == "scan_datasets":
@@ -304,7 +365,9 @@ def execute_tool(name: str, arguments: dict, llm=None) -> str:
         elif name == "deploy_model":
             return _exec_deploy_model(arguments)
         elif name == "predict":
-            return _exec_predict(arguments)
+            return _exec_predict(arguments, ui=ui)
+        elif name == "run_predictions":
+            return _exec_run_predictions(arguments, ui=ui)
         elif name == "check_monitoring":
             return _exec_check_monitoring()
         elif name == "check_retrain":
@@ -312,13 +375,51 @@ def execute_tool(name: str, arguments: dict, llm=None) -> str:
         elif name == "label_predictions":
             return _exec_label_predictions(arguments)
         elif name == "run_shell":
-            return _exec_run_shell(arguments)
+            return _exec_run_shell(arguments, ui=ui)
         elif name == "get_status":
             return _exec_get_status()
         else:
             return f"Unknown tool: {name}"
     except Exception as e:
         return f"Tool '{name}' failed: {e}"
+
+
+def _persist_agent_step(last_step: str, **fields) -> None:
+    from edge_train.agent import AgentState
+    from edge_train.agent.context import sync_agent_context, update_agent_context
+
+    state = AgentState.load()
+    update_agent_context(state, last_step=last_step, save=False, **fields)
+    sync_agent_context(state)
+
+
+def _parse_shell_purpose(cmd: str) -> str:
+    import shlex
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return ""
+    for i, part in enumerate(parts):
+        if part in ("--purpose", "-p") and i + 1 < len(parts):
+            return parts[i + 1]
+    return ""
+
+
+def _agent_phoenix_gate(ui=None):
+    """Check Phoenix; prompt to start local server when in agent REPL."""
+    from edge_train.config import load_config
+    from edge_train.inference.phoenix import prepare_phoenix_for_inference
+
+    _, arize, _, _ = load_config()
+    prompt_fn = (lambda msg: ui.confirm(msg)) if ui else None
+    echo_fn = (lambda msg: ui.markdown(msg)) if ui else None
+    return prepare_phoenix_for_inference(
+        required=arize.is_valid(),
+        interactive=bool(ui),
+        prompt_fn=prompt_fn,
+        echo_fn=echo_fn,
+    )
 
 
 def _exec_scan_datasets() -> str:
@@ -671,6 +772,7 @@ def _exec_train_model(arguments: dict) -> str:
     from edge_train.agent.progress import run_training_with_progress
 
     dataset = arguments.get("dataset_path", "")
+    purpose = (arguments.get("purpose") or "").strip()
     if dataset.startswith("builtin:"):
         name = dataset.split(":", 1)[1]
         from edge_train.datasets import get_builtin
@@ -688,6 +790,14 @@ def _exec_train_model(arguments: dict) -> str:
     epochs = arguments.get("epochs", 10)
 
     model_path = run_training_with_progress(dataset, target, output_dir, epochs)
+    _persist_agent_step(
+        "train",
+        training_purpose=purpose or Path(output_dir).name,
+        dataset_path=dataset,
+        modality="text",
+        training_status="succeeded",
+        model_path=model_path,
+    )
     return f"Training complete. Model saved to: `{model_path}`"
 
 
@@ -736,6 +846,12 @@ def _exec_deploy_model(arguments: dict) -> str:
 
     result = asyncio.run(edge_deploy(model_path, host=host, port=port))
     if result.success:
+        _persist_agent_step(
+            "deploy",
+            deployment_status="deployed",
+            deployment_target=f"{host}:{port}",
+            model_path=model_path,
+        )
         return (
             f"Deployed successfully to **{result.device_id}** in {result.elapsed_sec:.1f}s.\n"
             f"  Model: `{model_path}`\n"
@@ -744,31 +860,102 @@ def _exec_deploy_model(arguments: dict) -> str:
     return f"Deployment failed: {result.error}"
 
 
-def _exec_predict(arguments: dict) -> str:
+def _exec_predict(arguments: dict, ui=None) -> str:
     from edge_train.config import load_config
     from edge_train.inference import TextClassifier, log_prediction
-    from edge_train.phoenix_util import ensure_phoenix_ready
 
     _, arize, train_cfg, _ = load_config()
     log_path = train_cfg.prediction_log_path
 
     phoenix_active = False
+    phoenix_note = ""
     if arize.is_valid():
-        phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
-        if not phoenix_active:
-            return phoenix_err
+        prep = _agent_phoenix_gate(ui)
+        if prep.abort:
+            return prep.message
+        phoenix_active = prep.active
+        phoenix_note = prep.message or ""
 
-    model_path = arguments["model_path"]
+    endpoint = arguments.get("endpoint")
+    model_path = arguments.get("model_path")
+    modality = arguments.get("modality")
     text = arguments.get("text")
     csv_path = arguments.get("csv_path")
+    gcs_uri = arguments.get("gcs_uri")
+    image = arguments.get("image")
+
+    if bool(endpoint) == bool(model_path):
+        return (
+            "Error: provide exactly one of `endpoint` (Vertex cloud) or "
+            "`model_path` (local SavedModel)."
+        )
+
+    if endpoint:
+        from edge_train.cli.predict import _load_vertex_predictor, _resolve_endpoint_modality
+        from edge_train.config import GCPConfig
+        from edge_train.evaluate import format_inference_environment
+
+        gcp = GCPConfig()
+        resolved = _resolve_endpoint_modality(endpoint, modality)
+        env = format_inference_environment(
+            source="vertex",
+            modality=resolved,
+            endpoint=endpoint,
+            project=gcp.project_id,
+            location=gcp.location,
+        )
+        classifier = _load_vertex_predictor(endpoint, resolved)
+        source = "vertex"
+
+        payload = text or gcs_uri or image
+        if payload:
+            label, conf = classifier.predict(payload)
+            probs = classifier.predict_proba(payload)
+            display = (
+                classifier.format_input(payload)
+                if hasattr(classifier, "format_input")
+                else str(payload)
+            )
+            log_prediction(
+                log_path, display, label, conf, probs, create_span=phoenix_active, source=source
+            )
+            lines = [env, "", f"**Predicted:** {label} ({conf:.4f})"]
+            if phoenix_active:
+                lines.append(f"📡 OTEL span → **Arize Phoenix** (`{arize.project_name}`)")
+            elif phoenix_note:
+                lines.append(f"⚠️ {phoenix_note}")
+            return "\n".join(lines)
+
+        if csv_path:
+            tail = _exec_run_shell(
+                {
+                    "command": (
+                        f"predict --endpoint {endpoint} --modality {resolved} "
+                        f"--csv {csv_path} --log {log_path}"
+                    )
+                },
+                ui=ui,
+            )
+            return env + "\n\n" + tail
+
+        return (
+            f"{env}\n\nError: provide `text`, `gcs_uri`, `image`, or `csv_path` for Vertex predict."
+        )
 
     classifier = TextClassifier(model_path)
+    from edge_train.evaluate import format_inference_environment
+
+    env = format_inference_environment(
+        source="local", modality=modality or "text", model_path=model_path
+    )
 
     if text:
         label, conf = classifier.predict(text)
         probs = classifier.predict_proba(text)
         log_prediction(log_path, text, label, conf, probs, create_span=phoenix_active)
         lines = [
+            env,
+            "",
             f"**Predicted:** {label} ({conf:.4f})",
         ]
         for cls, prob in sorted(probs.items(), key=lambda x: -x[1])[1:]:
@@ -778,6 +965,9 @@ def _exec_predict(arguments: dict) -> str:
             lines.append(
                 f"📡 OTEL span sent to **Arize Phoenix** (`{arize.project_name}`)"
             )
+        elif phoenix_note:
+            lines.append("")
+            lines.append(f"⚠️ {phoenix_note}")
         return "\n".join(lines)
 
     if csv_path:
@@ -796,6 +986,8 @@ def _exec_predict(arguments: dict) -> str:
                 log_path, texts[i], label, conf, probs, create_span=phoenix_active
             )
         lines = [
+            env,
+            "",
             f"Batch predictions (**{len(results)}** rows) logged to `{log_path}`",
         ]
         for i, (label, conf) in enumerate(results[:10]):
@@ -807,9 +999,116 @@ def _exec_predict(arguments: dict) -> str:
             lines.append(
                 f"📡 **{len(results)}** OTEL spans sent to **Arize Phoenix** (`{arize.project_name}`)"
             )
+        elif phoenix_note:
+            lines.append("")
+            lines.append(f"⚠️ {phoenix_note}")
         return "\n".join(lines)
 
     return "Error: provide --text for single prediction or --csv for batch."
+
+
+def _exec_run_predictions(arguments: dict, ui=None) -> str:
+    """Batch-evaluate a labeled test JSONL via Vertex endpoint."""
+    from edge_train.config import GCPConfig, load_config
+    from edge_train.deployments import DeploymentRegistry
+    from edge_train.evaluate import format_evaluation_summary, run_vertex_evaluation
+    from edge_train.training_history import TrainingHistory
+
+    _, arize, _, _ = load_config()
+    phoenix_active = False
+    if arize.is_valid():
+        prep = _agent_phoenix_gate(ui)
+        if prep.abort:
+            return prep.message
+        phoenix_active = prep.active
+    else:
+        return (
+            "Phoenix not configured. Set PHOENIX_COLLECTOR_ENDPOINT "
+            "(and PHOENIX_API_KEY for cloud) before running predictions."
+        )
+
+    gcp = GCPConfig()
+    if not gcp.is_valid():
+        return "GCP not configured. Set GCP_PROJECT and GCP_LOCATION for Vertex predictions."
+
+    endpoint = (arguments.get("endpoint") or "").strip()
+    modality = (arguments.get("modality") or "image").strip()
+    test_jsonl = (arguments.get("test_jsonl") or "").strip()
+    limit = arguments.get("limit")
+
+    if not endpoint:
+        dep = DeploymentRegistry.load().latest_vertex()
+        if dep and dep.endpoint_name:
+            endpoint = dep.endpoint_name
+            if not arguments.get("modality") and dep.modality:
+                modality = dep.modality
+
+    if not endpoint:
+        history = TrainingHistory.load()
+        recent = next(
+            (
+                r
+                for r in history.records
+                if r.status == "succeeded" and r.mode == "cloud" and r.model_path
+            ),
+            None,
+        )
+        if recent:
+            return (
+                "Vertex model is trained but **not deployed to an endpoint** yet.\n\n"
+                f"- Model: `{recent.model_path}`\n\n"
+                "Deploy first, then evaluate:\n"
+                f"```\ncoralflow deploy --cloud --model {recent.model_path}\n"
+                "coralflow evaluate --endpoint <endpoint-id> --modality image "
+                "--dataset gs://coralflow/neu-cls/test.jsonl\n```"
+            )
+        return (
+            "No Vertex endpoint found. Deploy with `coralflow deploy --cloud --model <vertex-model>` "
+            "or pass `endpoint` to run_predictions."
+        )
+
+    if not test_jsonl:
+        for candidate in (
+            "gs://coralflow/neu-cls/test.jsonl",
+            "./neu-cls/test.jsonl",
+        ):
+            if candidate.startswith("gs://") or Path(candidate).exists():
+                test_jsonl = candidate
+                break
+        if not test_jsonl:
+            history = TrainingHistory.load()
+            for record in history.records:
+                if record.dataset_path and "neu" in record.dataset_path.lower():
+                    test_jsonl = "gs://coralflow/neu-cls/test.jsonl"
+                    break
+
+    if not test_jsonl:
+        return (
+            "Missing `test_jsonl`. Provide a labeled Vertex export JSONL, e.g. "
+            "`gs://coralflow/neu-cls/test.jsonl` (360 images)."
+        )
+
+    try:
+        result = run_vertex_evaluation(
+            endpoint=endpoint,
+            modality=modality,
+            dataset_path=test_jsonl,
+            project=gcp.project_id,
+            location=gcp.location,
+            limit=limit,
+            phoenix_active=phoenix_active,
+        )
+    except Exception as exc:
+        return (
+            f"Prediction run failed: {exc}\n\n"
+            "**Environment:** Vertex AI online endpoint (cloud)\n"
+            f"- Endpoint: `{endpoint}`\n"
+            f"- Test set: `{test_jsonl}`\n\n"
+            "If you see proxy/503 errors, retry when the network to Google APIs is stable."
+        )
+
+    _persist_agent_step("run_predictions", endpoint_name=endpoint)
+    return format_evaluation_summary(result)
 
 
 def _exec_check_monitoring() -> str:
@@ -1067,23 +1366,27 @@ def _exec_label_predictions(arguments: dict) -> str:
 
 
 _CORALFLOW_CLI_CMDS = frozenset(
-    {"agent", "init", "train", "validate", "deploy", "monitor", "cost", "predict"}
+    {"agent", "init", "train", "validate", "deploy", "monitor", "cost", "predict", "simulate", "evaluate"}
 )
 
 # Long-running CLI subcommands stream stdout instead of blocking silently.
 _LONG_RUNNING_CMDS = frozenset({"train", "validate"})
 
 
-def _subprocess_env() -> dict[str, str]:
+def _subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Quiet TensorFlow startup noise for subprocess CLI runs."""
     env = os.environ.copy()
     env.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
     env.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    if extra:
+        env.update(extra)
     return env
 
 
-def _stream_coralflow_cli(cmd_argv: list[str], timeout: int = 1800) -> tuple[str, int]:
+def _stream_coralflow_cli(
+    cmd_argv: list[str], timeout: int = 1800, extra_env: dict[str, str] | None = None
+) -> tuple[str, int]:
     """Run coralflow CLI with live terminal output. Returns (tail_output, exit_code)."""
     from edge_train.agent.ui import CoralFlowUI
 
@@ -1095,7 +1398,7 @@ def _stream_coralflow_cli(cmd_argv: list[str], timeout: int = 1800) -> tuple[str
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        env=_subprocess_env(),
+        env=_subprocess_env(extra_env),
     )
     try:
         assert proc.stdout is not None
@@ -1114,10 +1417,30 @@ def _stream_coralflow_cli(cmd_argv: list[str], timeout: int = 1800) -> tuple[str
     return tail, return_code
 
 
-def _exec_run_shell(arguments: dict) -> str:
+def _exec_run_shell(arguments: dict, ui=None) -> str:
     cmd = arguments.get("command", "")
     if not cmd:
         return "No command provided."
+
+    lowered = cmd.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "from google.cloud import aiplatform",
+            "google.cloud.aiplatform",
+            "<< 'pyeof'",
+            "<<'pyeof'",
+            "aiplatform.init(",
+            "endpoint.deploy(",
+            "prediction_serviceclient",
+        )
+    ):
+        return (
+            "Blocked ad-hoc Vertex/GCP Python. Use CoralFlow tools instead:\n"
+            "- `run_predictions` — batch test-set evaluation on a Vertex endpoint\n"
+            "- `predict` — single or CSV inference (local or `--endpoint`)\n"
+            "- `run_shell` with `deploy --cloud`, `evaluate`, or `simulate` CLI subcommands"
+        )
 
     # Strip "coralflow" / "coralflow " prefix — LLM may include it
     if cmd.startswith("coralflow "):
@@ -1129,22 +1452,39 @@ def _exec_run_shell(arguments: dict) -> str:
         return "No command provided."
 
     sub = cmd.split()[0] if cmd.split() else ""
+    extra_env: dict[str, str] | None = None
 
-    if sub == "predict":
+    if sub in ("predict", "simulate", "evaluate"):
         from edge_train.config import load_config
-        from edge_train.phoenix_util import ensure_phoenix_ready
 
         _, arize, _, _ = load_config()
         if arize.is_valid():
-            phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
-            if not phoenix_active:
-                return phoenix_err
+            prep = _agent_phoenix_gate(ui)
+            if prep.abort:
+                return prep.message
+            if not prep.active:
+                extra_env = {"CORALFLOW_PHOENIX_SKIP": "1"}
 
     try:
         if sub in _CORALFLOW_CLI_CMDS:
             cmd_argv = [sys.executable, "-m", "edge_train.cli"] + cmd.split()
             timeout = 1800 if sub in _LONG_RUNNING_CMDS else 300
-            output, return_code = _stream_coralflow_cli(cmd_argv, timeout=timeout)
+            output, return_code = _stream_coralflow_cli(
+                cmd_argv, timeout=timeout, extra_env=extra_env
+            )
+            if return_code == 0 and sub in (
+                "train",
+                "deploy",
+                "evaluate",
+                "predict",
+                "simulate",
+            ):
+                fields: dict = {}
+                if sub == "train":
+                    purpose = _parse_shell_purpose(cmd)
+                    if purpose:
+                        fields["training_purpose"] = purpose
+                _persist_agent_step(sub, **fields)
             if return_code != 0:
                 return output.strip() or f"Command failed (exit code {return_code})"
             return output.strip() or f"Command completed (exit code {return_code})"
@@ -1155,7 +1495,7 @@ def _exec_run_shell(arguments: dict) -> str:
             capture_output=True,
             text=True,
             timeout=300,
-            env=_subprocess_env(),
+            env=_subprocess_env(extra_env),
         )
         output = result.stdout or ""
         if result.stderr:
@@ -1169,35 +1509,32 @@ def _exec_run_shell(arguments: dict) -> str:
 
 def _exec_get_status() -> str:
     from edge_train.agent import AgentState
+    from edge_train.agent.context import format_project_context, sync_agent_context
     from edge_train.training_history import TrainingHistory, format_startup_summary
 
-    state = AgentState.load()
+    state = sync_agent_context(AgentState.load())
     history = TrainingHistory.load()
     history.sync_cloud_jobs()
+
     lines = [
         "## CoralFlow Agent Status",
         f"  State file: `~/.coralflow/agent_state.json`",
         f"  Training history: `~/.coralflow/training_history.json`",
+        "",
+        "### Current project",
     ]
 
-    if state.dataset_path:
-        lines.append(f"  Active dataset: `{state.dataset_path}`")
-    if state.model_path:
-        lines.append(f"  Active model:   `{state.model_path}`")
-    if state.task_type:
-        lines.append(f"  Task type:      {state.task_type}")
-    if state.deployment_target:
-        lines.append(f"  Deployment:     {state.deployment_target}")
-    if state.last_step:
-        lines.append(f"  Last step:      {state.last_step}")
-    if state.conversation_summary:
-        lines.append(f"  Summary:        {state.conversation_summary[:200]}")
+    project = format_project_context(state)
+    if project:
+        lines.extend(f"  {line}" for line in project.splitlines())
+    else:
+        lines.append("  (no project context saved yet)")
 
-    # Also run scan for datasets and models
     from edge_train.agent import DatasetScanner, scan_models
 
     datasets = DatasetScanner.scan()
     models = scan_models()
+    lines.append("")
     lines.append(f"  Datasets found: {len(datasets)}")
     lines.append(f"  Models found:   {len(models)}")
 
@@ -1205,8 +1542,5 @@ def _exec_get_status() -> str:
     if training_summary:
         lines.append("")
         lines.append(training_summary)
-
-    if not state.dataset_path and not state.model_path:
-        lines.append("  (fresh session — no prior state)")
 
     return "\n".join(lines)

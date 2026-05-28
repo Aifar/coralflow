@@ -13,6 +13,7 @@ from edge_train.cloud.serving import (
     deploy_model_to_vertex,
     is_vertex_endpoint,
     is_vertex_resource,
+    model_supports_dedicated_deployment,
     parse_automl_classification,
     resolve_vertex_predictor,
 )
@@ -62,6 +63,9 @@ class TestDeployModelToVertex:
         endpoint.list_models.return_value = [mocker.MagicMock(id="dm-1")]
         mock_model = mock_model_cls.return_value
         mock_model.display_name = "test-model"
+        mock_model.gca_resource = mocker.MagicMock(
+            supported_deployment_resources_types=["DEDICATED_RESOURCES"]
+        )
         mock_model.deploy.return_value = endpoint
         mocker.patch(
             "edge_train.config.ensure_gcp_credentials", return_value=(True, "")
@@ -75,6 +79,32 @@ class TestDeployModelToVertex:
         assert result.endpoint_name.endswith("/endpoints/1")
         mock_init.assert_called_once()
         mock_model.deploy.assert_called_once()
+        assert "machine_type" in mock_model.deploy.call_args.kwargs
+
+    def test_automl_deploy_omits_machine_type(self, mocker):
+        mock_init = mocker.patch("google.cloud.aiplatform.init")
+        mock_model_cls = mocker.patch("google.cloud.aiplatform.Model")
+        endpoint = mocker.MagicMock()
+        endpoint.resource_name = "projects/p/locations/us/endpoints/2"
+        endpoint.list_models.return_value = [mocker.MagicMock(id="dm-2")]
+        mock_model = mock_model_cls.return_value
+        mock_model.display_name = "automl-image"
+        mock_model.gca_resource = mocker.MagicMock(
+            supported_deployment_resources_types=[]
+        )
+        mock_model.deploy.return_value = endpoint
+        mocker.patch(
+            "edge_train.config.ensure_gcp_credentials", return_value=(True, "")
+        )
+
+        deploy_model_to_vertex(
+            "projects/p/locations/us/models/2",
+            project="p",
+            location="us",
+        )
+        kwargs = mock_model.deploy.call_args.kwargs
+        assert "machine_type" not in kwargs
+        assert kwargs.get("sync") is True
 
 
 class TestVertexTextPredictor:

@@ -32,6 +32,7 @@ class TrainingRecord:
     mode: str
     target_column: str = ""
     base_model: str = ""
+    purpose: str = ""
     job_name: str = ""
     status: str = "running"
     model_path: str = ""
@@ -239,8 +240,9 @@ def format_startup_summary(history: TrainingHistory | None = None) -> str:
             lines.append("")
         lines.append("Recent completed training:")
         for record in recent:
+            label = record.purpose or record.dataset_label
             lines.append(
-                f"  • {record.dataset_label} ({record.method}) → "
+                f"  • {label} ({record.method}) → "
                 f"{record.model_path or record.output_dir or 'saved'}"
             )
 

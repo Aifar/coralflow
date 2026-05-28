@@ -24,12 +24,12 @@ class TestAgentState:
 
         state_file = tmp_path / "state.json"
         state = AgentState(
+            training_purpose="neu_cls_defect_classifier_v3",
             dataset_path="/data/test.csv",
             model_path="/models/test",
-            task_type="text-classification",
-            deployment_target="10.0.0.1",
+            modality="text",
+            training_status="succeeded",
             last_step="train",
-            conversation_summary="User trained a model.",
         )
         state.save(str(state_file))
         assert state_file.exists()
@@ -37,10 +37,10 @@ class TestAgentState:
         loaded = AgentState.load(str(state_file))
         assert loaded.dataset_path == "/data/test.csv"
         assert loaded.model_path == "/models/test"
-        assert loaded.task_type == "text-classification"
-        assert loaded.deployment_target == "10.0.0.1"
+        assert loaded.training_purpose == "neu_cls_defect_classifier_v3"
+        assert loaded.modality == "text"
+        assert loaded.training_status == "succeeded"
         assert loaded.last_step == "train"
-        assert loaded.conversation_summary == "User trained a model."
 
     def test_load_nonexistent_returns_default(self, tmp_path):
         from edge_train.agent import AgentState
@@ -613,8 +613,8 @@ class TestRunShell:
 
         calls = []
 
-        def fake_stream(argv, timeout=300):
-            calls.append((argv, timeout))
+        def fake_stream(argv, timeout=300, extra_env=None):
+            calls.append((argv, timeout, extra_env))
             return "epoch 1/10", 0
 
         monkeypatch.setattr("edge_train.agent.tools._stream_coralflow_cli", fake_stream)

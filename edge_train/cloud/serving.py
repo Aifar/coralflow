@@ -30,6 +30,18 @@ class VertexDeployResult:
     deployed_model_id: str = ""
 
 
+def model_supports_dedicated_deployment(model) -> bool:
+    """Return True when the Vertex model accepts machine_type / dedicated resources."""
+    try:
+        gca = model.gca_resource
+        types = list(getattr(gca, "supported_deployment_resources_types", []) or [])
+        if not types:
+            return False
+        return any("DEDICATED" in str(t).upper() for t in types)
+    except Exception:
+        return True
+
+
 def deploy_model_to_vertex(
     model_name: str,
     *,
@@ -51,13 +63,17 @@ def deploy_model_to_vertex(
 
     aip.init(project=project, location=location)
     model = aip.Model(model_name)
-    endpoint = model.deploy(
-        deployed_model_display_name=display_name or f"coralflow-{model.display_name}",
-        machine_type=machine_type,
-        min_replica_count=min_replica_count,
-        max_replica_count=max_replica_count,
-        sync=True,
-    )
+    deploy_kwargs: dict[str, Any] = {
+        "deployed_model_display_name": display_name
+        or f"coralflow-{model.display_name}",
+        "sync": True,
+    }
+    # AutoML Image/Tabular/Video models require automatic_resources only.
+    if model_supports_dedicated_deployment(model):
+        deploy_kwargs["machine_type"] = machine_type
+        deploy_kwargs["min_replica_count"] = min_replica_count
+        deploy_kwargs["max_replica_count"] = max_replica_count
+    endpoint = model.deploy(**deploy_kwargs)
     deployed = endpoint.list_models()[0] if endpoint.list_models() else None
     return VertexDeployResult(
         model_path=model_name,

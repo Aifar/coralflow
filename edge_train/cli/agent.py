@@ -45,8 +45,11 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
         )
         sys.exit(1)
 
-    # Load agent state
+    # Load agent state and sync from training history / deployments
     state = AgentState.load()
+    from edge_train.agent.context import format_project_context, sync_agent_context
+
+    state = sync_agent_context(state)
 
     # Build context for the loop banner
     ctx_parts = [f"LLM: {config.model}"]
@@ -91,8 +94,14 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
         scan_result = ""
         ctx_parts.append("Resumed from previous session")
 
+    project_ctx = format_project_context(state)
+    if project_ctx:
+        ctx_parts.append("Project context loaded")
+
     if state.dataset_path:
-        ctx_parts.append(f"Last dataset: {state.dataset_path}")
+        ctx_parts.append(f"Dataset: {state.dataset_path}")
+    if state.training_purpose:
+        ctx_parts.append(f"Project: {state.training_purpose}")
 
     ctx_summary = " | ".join(ctx_parts)
 

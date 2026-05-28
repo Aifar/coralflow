@@ -12,6 +12,7 @@ from edge_train.cli.monitor import monitor
 from edge_train.cli.cost import cost
 from edge_train.cli.predict import predict
 from edge_train.cli.simulate import simulate
+from edge_train.cli.evaluate import evaluate
 from edge_train.cli.agent import agent
 from edge_train.cli.demo import demo
 from edge_train.cli.models import models
@@ -35,6 +36,7 @@ main.add_command(monitor)
 main.add_command(cost)
 main.add_command(predict)
 main.add_command(simulate)
+main.add_command(evaluate)
 main.add_command(demo)
 main.add_command(models)
 
