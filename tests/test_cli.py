@@ -456,6 +456,8 @@ class TestPredictCommand:
         assert result.exit_code == 0
         assert "--model" in result.output
         assert "--endpoint" in result.output
+        assert "--modality" in result.output
+        assert "--image" in result.output
         assert "--text" in result.output
         assert "--csv" in result.output
 
@@ -481,6 +483,60 @@ class TestPredictCommand:
         )
         assert result.exit_code == 0, result.output
         assert "Predicted: urgent" in result.output
+
+    def test_vertex_tabular_predict(self, runner, mocker, monkeypatch):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        mock_predictor = mocker.MagicMock()
+        mock_predictor.predict.return_value = ("yes", 0.82)
+        mock_predictor.predict_proba.return_value = {"yes": 0.82, "no": 0.18}
+        mock_predictor.format_input.return_value = '{"age": 30}'
+        mocker.patch(
+            "edge_train.cli.predict._load_vertex_predictor",
+            return_value=mock_predictor,
+        )
+
+        result = runner.invoke(
+            predict,
+            [
+                "--endpoint",
+                "projects/test/locations/us/endpoints/1",
+                "--modality",
+                "table",
+                "--features",
+                '{"age": 30, "plan": "monthly"}',
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Predicted: yes" in result.output
+
+    def test_vertex_image_predict(self, runner, mocker, monkeypatch, tmp_path):
+        monkeypatch.setenv("GCP_PROJECT", "test-project")
+        monkeypatch.setenv("GCP_STAGING_BUCKET", "gs://test-bucket")
+        img = tmp_path / "x.jpg"
+        img.write_bytes(b"fake")
+        mock_predictor = mocker.MagicMock()
+        mock_predictor.predict.return_value = ("cat", 0.91)
+        mock_predictor.predict_proba.return_value = {"cat": 0.91}
+        mock_predictor.format_input.return_value = str(img)
+        mocker.patch(
+            "edge_train.cli.predict._load_vertex_predictor",
+            return_value=mock_predictor,
+        )
+
+        result = runner.invoke(
+            predict,
+            [
+                "--endpoint",
+                "projects/test/locations/us/endpoints/1",
+                "--modality",
+                "image",
+                "--image",
+                str(img),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Predicted: cat" in result.output
 
     def test_single_prediction(self, runner, sample_text_csv, tmp_path):
         from edge_train.trainer import train_text_classifier

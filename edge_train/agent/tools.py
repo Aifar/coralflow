@@ -867,8 +867,9 @@ def _exec_check_monitoring() -> str:
         lines.append("")
         lines.append("**Inference paths (both send Phoenix spans when configured):**")
         lines.append("- Local/edge: `coralflow predict --model <SavedModel>`")
+        lines.append('- Vertex text: `coralflow predict --endpoint <id> --text "..."`')
         lines.append(
-            "- Vertex: `coralflow predict --endpoint projects/.../endpoints/ID`"
+            "- Vertex AutoML: add `--modality table|image|video` with --csv, --image, or --gcs-uri"
         )
 
         from edge_train.deployments import DeploymentRegistry

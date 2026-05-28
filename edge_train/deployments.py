@@ -82,8 +82,19 @@ class DeploymentRegistry:
             return record
         return None
 
+    def find_by_endpoint(self, endpoint_name: str) -> DeploymentRecord | None:
+        for record in self.records:
+            if record.endpoint_name == endpoint_name:
+                return record
+        return None
 
-def format_phoenix_monitoring_hint(*, endpoint: str = "", model_path: str = "") -> str:
+
+def format_phoenix_monitoring_hint(
+    *,
+    endpoint: str = "",
+    model_path: str = "",
+    modality: str = "",
+) -> str:
     lines = [
         "",
         "  Arize Phoenix monitoring:",
@@ -91,7 +102,21 @@ def format_phoenix_monitoring_hint(*, endpoint: str = "", model_path: str = "") 
         "    2. coralflow monitor --status",
     ]
     if endpoint:
-        lines.append(f'    3. coralflow predict --endpoint {endpoint} --text "..."')
+        mod = modality.lower().strip()
+        if mod == "table":
+            lines.append(
+                f"    3. coralflow predict --endpoint {endpoint} --modality table --csv rows.csv"
+            )
+        elif mod == "image":
+            lines.append(
+                f"    3. coralflow predict --endpoint {endpoint} --modality image --image path.jpg"
+            )
+        elif mod == "video":
+            lines.append(
+                f"    3. coralflow predict --endpoint {endpoint} --modality video --gcs-uri gs://..."
+            )
+        else:
+            lines.append(f'    3. coralflow predict --endpoint {endpoint} --text "..."')
     elif model_path:
         lines.append(f'    3. coralflow predict --model {model_path} --text "..."')
     else:

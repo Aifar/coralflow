@@ -202,4 +202,9 @@ def _deploy_vertex(
     )
 
     click.echo(f"  Endpoint: {result.endpoint_name}")
-    click.echo(format_phoenix_monitoring_hint(endpoint=result.endpoint_name))
+    click.echo(
+        format_phoenix_monitoring_hint(
+            endpoint=result.endpoint_name,
+            modality=modality,
+        )
+    )

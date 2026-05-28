@@ -15,10 +15,16 @@ from edge_train.cloud.publisher_models import (
     resolve_finetune_base_model,
 )
 from edge_train.cloud.serving import (
+    VertexAutoMLPredictor,
+    VertexImagePredictor,
+    VertexTabularPredictor,
     VertexTextPredictor,
+    VertexVideoPredictor,
     deploy_model_to_vertex,
     is_vertex_endpoint,
     is_vertex_resource,
+    parse_automl_classification,
+    resolve_vertex_predictor,
 )
 from edge_train.cloud.router import (
     CloudTrainingMethod,
@@ -44,6 +50,12 @@ __all__ = [
     "deploy_model_to_vertex",
     "is_vertex_resource",
     "is_vertex_endpoint",
+    "parse_automl_classification",
+    "resolve_vertex_predictor",
+    "VertexAutoMLPredictor",
+    "VertexTabularPredictor",
+    "VertexImagePredictor",
+    "VertexVideoPredictor",
     "VertexTextPredictor",
     "_upload_to_gcs",
 ]
