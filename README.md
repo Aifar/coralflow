@@ -1,6 +1,8 @@
 # CoralFlow
 
-**TinyML continuous training** — train, validate, deploy, monitor, and auto-retrain text classifiers from the CLI. No GPU required for local training. Includes an LLM-powered interactive agent (`coralflow agent`) that guides the full pipeline.
+**The AI-Driven TinyML Pipeline.**
+
+Seamlessly train, validate, and deploy models to edge devices via CLI. With built-in drift detection, auto-retraining, and HTTP-based updates, our LLM agent takes care of the heavy lifting—managing your entire workflow automatically.
 
 **Version:** 0.4.0 · **License:** MIT
 
