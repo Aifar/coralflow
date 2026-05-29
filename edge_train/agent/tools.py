@@ -827,18 +827,27 @@ def _format_deploy_result(result, model_path: str) -> str:
 
 
 def _exec_predict(arguments: dict) -> str:
+    from edge_train.agent.google_env import require_phoenix_env
+    from edge_train.agent.ui import CoralFlowUI
     from edge_train.config import load_config
     from edge_train.inference import TextClassifier, log_prediction
-    from edge_train.phoenix_util import ensure_phoenix_ready
+
+    ui = CoralFlowUI()
+
+    def _prompt(label: str, *, default: str = "") -> str:
+        if default:
+            ui.info(f"Default: {default}")
+        try:
+            return ui.prompt(label)
+        except (EOFError, KeyboardInterrupt):
+            return "skip"
 
     _, arize, train_cfg, _ = load_config()
     log_path = train_cfg.prediction_log_path
 
-    phoenix_active = False
-    if arize.is_valid():
-        phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
-        if not phoenix_active:
-            return phoenix_err
+    phoenix_active, note = require_phoenix_env(_prompt, echo=ui.info)
+    if note:
+        ui.info(note)
 
     model_path = arguments["model_path"]
     text = arguments.get("text")
@@ -1156,16 +1165,22 @@ _CORALFLOW_CLI_CMDS = frozenset(
 _LONG_RUNNING_CMDS = frozenset({"train", "validate"})
 
 
-def _subprocess_env() -> dict[str, str]:
+def _subprocess_env(*, skip_phoenix: bool = False) -> dict[str, str]:
     """Quiet TensorFlow startup noise for subprocess CLI runs."""
     env = os.environ.copy()
     env.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
     env.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    if skip_phoenix:
+        env["CORALFLOW_SKIP_PHOENIX"] = "1"
+    else:
+        env.pop("CORALFLOW_SKIP_PHOENIX", None)
     return env
 
 
-def _stream_coralflow_cli(cmd_argv: list[str], timeout: int = 1800) -> tuple[str, int]:
+def _stream_coralflow_cli(
+    cmd_argv: list[str], timeout: int = 1800, *, skip_phoenix: bool = False
+) -> tuple[str, int]:
     """Run coralflow CLI with live terminal output. Returns (tail_output, exit_code)."""
     from edge_train.agent.ui import CoralFlowUI
 
@@ -1177,7 +1192,7 @@ def _stream_coralflow_cli(cmd_argv: list[str], timeout: int = 1800) -> tuple[str
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        env=_subprocess_env(),
+        env=_subprocess_env(skip_phoenix=skip_phoenix),
     )
     try:
         assert proc.stdout is not None
@@ -1212,21 +1227,51 @@ def _exec_run_shell(arguments: dict) -> str:
 
     sub = cmd.split()[0] if cmd.split() else ""
 
-    if sub == "predict":
-        from edge_train.config import load_config
-        from edge_train.phoenix_util import ensure_phoenix_ready
+    from edge_train.agent.google_env import (
+        require_google_env,
+        require_phoenix_env,
+        shell_command_needs_google_env,
+        shell_command_needs_phoenix,
+    )
 
-        _, arize, _, _ = load_config()
-        if arize.is_valid():
-            phoenix_active, phoenix_err = ensure_phoenix_ready(arize)
-            if not phoenix_active:
-                return phoenix_err
+    ui = None
+    skip_phoenix = False
+
+    def _make_prompt(ui_ref):
+        def _prompt(label: str, *, default: str = "") -> str:
+            if default:
+                ui_ref.info(f"Default: {default}")
+            try:
+                return ui_ref.prompt(label)
+            except (EOFError, KeyboardInterrupt):
+                return "skip"
+
+        return _prompt
+
+    if shell_command_needs_google_env(cmd) or shell_command_needs_phoenix(cmd):
+        from edge_train.agent.ui import CoralFlowUI
+
+        ui = CoralFlowUI()
+        prompt_fn = _make_prompt(ui)
+
+    if shell_command_needs_google_env(cmd):
+        ok, err = require_google_env(prompt_fn, echo=ui.error)
+        if not ok:
+            return err
+
+    if shell_command_needs_phoenix(cmd):
+        use_phoenix, note = require_phoenix_env(prompt_fn, echo=ui.info)
+        skip_phoenix = not use_phoenix
+        if note:
+            ui.info(note)
 
     try:
         if sub in _CORALFLOW_CLI_CMDS:
             cmd_argv = [sys.executable, "-m", "edge_train.cli"] + cmd.split()
             timeout = 1800 if sub in _LONG_RUNNING_CMDS else 300
-            output, return_code = _stream_coralflow_cli(cmd_argv, timeout=timeout)
+            output, return_code = _stream_coralflow_cli(
+                cmd_argv, timeout=timeout, skip_phoenix=skip_phoenix
+            )
             if return_code != 0:
                 return output.strip() or f"Command failed (exit code {return_code})"
             return output.strip() or f"Command completed (exit code {return_code})"

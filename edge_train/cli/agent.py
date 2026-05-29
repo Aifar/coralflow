@@ -19,8 +19,7 @@ def agent(
     The agent discovers datasets, assesses local resources, validates data,
     trains models, and deploys — all through natural conversation.
 
-    If the LLM is not configured or unreachable, you can enter settings or
-    run commands manually without exiting.
+    Requires a working LLM API key (environment, .env, or --api-key).
     """
     from edge_train.config import load_config
     from edge_train.agent.llm import LLMConfig, ensure_llm_client
@@ -45,23 +44,28 @@ def agent(
     def _echo(msg: str) -> None:
         ui.error(msg.strip())
 
-    llm, llm_enabled = ensure_llm_client(
+    llm = ensure_llm_client(
         config,
         _llm_prompt_fn(ui),
         echo=_echo,
     )
 
+    if api_key or model or endpoint:
+        from edge_train.agent.llm import persist_llm_config
+
+        persist_llm_config(llm.config)
+
+    from edge_train.agent.google_env import ensure_google_env_at_startup
+
+    ensure_google_env_at_startup(_llm_prompt_fn(ui), echo=_echo)
+
     # Load agent state
     state = AgentState.load()
 
     # Build context for the loop banner
-    ctx_parts = []
-    if llm_enabled:
-        ctx_parts.append(f"LLM: {llm.config.model}")
-        if llm.config.endpoint != "https://api.openai.com/v1":
-            ctx_parts.append(f"Endpoint: {llm.config.endpoint}")
-    else:
-        ctx_parts.append("LLM: manual mode")
+    ctx_parts = [f"LLM: {llm.config.model}"]
+    if llm.config.endpoint != "https://api.openai.com/v1":
+        ctx_parts.append(f"Endpoint: {llm.config.endpoint}")
 
     if not resume:
         datasets = DatasetScanner.scan()
@@ -107,7 +111,7 @@ def agent(
     ctx_summary = " | ".join(ctx_parts)
 
     try:
-        run_agent_loop(llm, state, scan_result, ctx_summary, llm_enabled=llm_enabled)
+        run_agent_loop(llm, state, scan_result, ctx_summary, llm_enabled=True)
     except KeyboardInterrupt:
         click.echo()
 

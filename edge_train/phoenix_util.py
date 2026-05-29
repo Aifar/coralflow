@@ -75,7 +75,9 @@ def check_phoenix_running(arize_config, timeout: float = 3.0) -> PhoenixStatus:
         derive_dashboard_url(endpoint) if endpoint else "https://app.phoenix.arize.com"
     )
 
-    if not arize_config.is_valid():
+    from edge_train.config import phoenix_explicitly_configured
+
+    if not phoenix_explicitly_configured(arize_config):
         return PhoenixStatus(
             configured=False,
             reachable=False,
@@ -194,7 +196,9 @@ def ensure_phoenix_ready(arize_config) -> tuple[bool, str]:
         (active, error_message) — active is True when spans can be sent.
         When not configured, returns (False, "") and prediction may proceed without OTEL.
     """
-    if not arize_config.is_valid():
+    from edge_train.config import phoenix_explicitly_configured
+
+    if not phoenix_explicitly_configured(arize_config):
         return False, ""
 
     status = check_phoenix_running(arize_config)

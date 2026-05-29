@@ -25,8 +25,11 @@ class TestPhoenixUtil:
         assert not status.reachable
 
     @patch("edge_train.phoenix_util._probe_url")
-    def test_check_local_unreachable(self, mock_probe):
+    def test_check_local_unreachable(self, mock_probe, monkeypatch):
         mock_probe.return_value = (False, "connection refused")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces"
+        )
         cfg = ArizeConfig(
             api_key="key",
             collector_endpoint="http://localhost:6006/v1/traces",
@@ -38,8 +41,12 @@ class TestPhoenixUtil:
         assert "phoenix serve" in format_phoenix_start_instructions(status)
 
     @patch("edge_train.phoenix_util._probe_url")
-    def test_check_cloud_reachable(self, mock_probe):
+    def test_check_cloud_reachable(self, mock_probe, monkeypatch):
         mock_probe.return_value = (True, "HTTP 200")
+        monkeypatch.setenv("PHOENIX_API_KEY", "key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://app.phoenix.arize.com/v1/traces"
+        )
         cfg = ArizeConfig(
             api_key="key",
             collector_endpoint="https://app.phoenix.arize.com/v1/traces",
@@ -56,7 +63,10 @@ class TestPhoenixUtil:
 
     @patch("edge_train.phoenix_util._register_phoenix")
     @patch("edge_train.phoenix_util.check_phoenix_running")
-    def test_ensure_blocks_when_down(self, mock_check, mock_register):
+    def test_ensure_blocks_when_down(self, mock_check, mock_register, monkeypatch):
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces"
+        )
         mock_check.return_value = MagicMock(
             configured=True,
             reachable=False,
@@ -76,7 +86,11 @@ class TestPhoenixUtil:
 
     @patch("edge_train.phoenix_util._register_phoenix")
     @patch("edge_train.phoenix_util.check_phoenix_running")
-    def test_ensure_registers_when_up(self, mock_check, mock_register):
+    def test_ensure_registers_when_up(self, mock_check, mock_register, monkeypatch):
+        monkeypatch.setenv("PHOENIX_API_KEY", "key")
+        monkeypatch.setenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "https://app.phoenix.arize.com/v1/traces"
+        )
         mock_check.return_value = MagicMock(
             configured=True,
             reachable=True,

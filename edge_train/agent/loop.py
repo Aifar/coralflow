@@ -8,6 +8,7 @@ import shlex
 from typing import TYPE_CHECKING
 
 from edge_train.agent.llm import (
+    build_assistant_tool_calls_message,
     format_llm_setup_hint,
     is_llm_error_response,
     prompt_llm_config_interactive,
@@ -65,10 +66,12 @@ Format all responses in Markdown:
 
 
 def _assistant_msg(resp) -> dict:
-    """Build an assistant message dict, including reasoning_content if present (DeepSeek)."""
+    """Build an assistant message dict, including provider-specific fields."""
     msg: dict = {"role": "assistant", "content": resp.content or ""}
     if resp.reasoning_content:
         msg["reasoning_content"] = resp.reasoning_content
+    if getattr(resp, "extra_content", None):
+        msg["extra_content"] = resp.extra_content
     return msg
 
 
@@ -202,6 +205,9 @@ def _offer_llm_recovery_or_manual(
             return False, False
         ok, err = llm.verify_connection()
         if ok:
+            from edge_train.agent.llm import persist_llm_config
+
+            persist_llm_config(config)
             ui.success("LLM connected.")
             return True, True
         _show_llm_setup_help(llm, ui, err)
@@ -236,24 +242,7 @@ def _run_llm_turn(
         return llm_enabled, False
 
     while resp.tool_calls:
-        tc_msg: dict = {
-            "role": "assistant",
-            "content": resp.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.name,
-                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                    },
-                }
-                for tc in resp.tool_calls
-            ],
-        }
-        if resp.reasoning_content:
-            tc_msg["reasoning_content"] = resp.reasoning_content
-        messages.append(tc_msg)
+        messages.append(build_assistant_tool_calls_message(resp))
 
         for tc in resp.tool_calls:
             cmd = None

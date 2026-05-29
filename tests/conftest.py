@@ -59,4 +59,11 @@ def clear_env():
     for key in list(os.environ):
         if key.startswith(("GCP_", "ARIZE_", "PHOENIX_", "EDGE_", "CORALFLOW_")):
             os.environ.pop(key, None)
+    try:
+        from edge_train.agent import google_env as ge
+
+        ge._gcp_skipped_at_startup = False
+        ge._phoenix_skipped_at_startup = False
+    except ImportError:
+        pass
     yield

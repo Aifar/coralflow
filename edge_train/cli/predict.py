@@ -6,8 +6,6 @@ import sys
 
 import click
 
-from edge_train.config import load_config
-
 TEXT_COLUMN_NAMES = {
     "text",
     "message",
@@ -137,6 +135,7 @@ def predict(
         )
         sys.exit(1)
 
+    from edge_train.config import load_config, phoenix_explicitly_configured
     from edge_train.inference.phoenix import (
         echo_phoenix_exit_error,
         prepare_phoenix_for_inference,
@@ -146,7 +145,7 @@ def predict(
     log_file = log_path or train_cfg.prediction_log_path
 
     phoenix_active = False
-    if arize.is_valid():
+    if phoenix_explicitly_configured(arize):
         phoenix_active, phoenix_err = prepare_phoenix_for_inference(required=True)
         if not phoenix_active:
             echo_phoenix_exit_error(phoenix_err)

@@ -55,7 +55,7 @@ def monitor(
 
     Requires PHOENIX_API_KEY and PHOENIX_COLLECTOR_ENDPOINT for tracing.
     """
-    from edge_train.config import load_config
+    from edge_train.config import load_config, phoenix_explicitly_configured
 
     _, arize, train_cfg, _ = load_config()
 
@@ -76,14 +76,21 @@ def monitor(
         )
         return
 
-    if not arize.is_valid():
+    if not phoenix_explicitly_configured(arize):
         click.echo(
             "  Phoenix not configured. "
-            "Set PHOENIX_API_KEY and PHOENIX_COLLECTOR_ENDPOINT."
+            "Set PHOENIX_COLLECTOR_ENDPOINT "
+            "(and PHOENIX_API_KEY for Phoenix Cloud)."
         )
         return
 
+    from edge_train.inference.phoenix import should_skip_phoenix
     from edge_train.phoenix_util import check_phoenix_running, ensure_phoenix_ready
+
+    if should_skip_phoenix():
+        if status:
+            click.echo("  Status:                  tracing skipped")
+        return
 
     probe = check_phoenix_running(arize)
     if status:

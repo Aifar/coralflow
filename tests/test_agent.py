@@ -168,6 +168,179 @@ class TestRecommender:
         assert rec_small["epochs"] >= rec_large["epochs"]
 
 
+class TestGeminiLLMCompat:
+    def test_is_gemini_compatible(self):
+        from edge_train.agent.llm import LLMConfig, is_gemini_compatible
+
+        assert is_gemini_compatible(
+            LLMConfig(
+                endpoint="https://generativelanguage.googleapis.com/v1beta/openai",
+                model="gemini-3.1-pro-preview",
+            )
+        )
+        assert not is_gemini_compatible(
+            LLMConfig(endpoint="https://api.openai.com/v1", model="gpt-4o")
+        )
+
+    def test_ensure_gemini_adds_skip_signature(self):
+        from edge_train.agent.llm import (
+            GEMINI_SKIP_THOUGHT_SIGNATURE,
+            LLMConfig,
+            ensure_gemini_tool_signatures,
+        )
+
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "scan_datasets", "arguments": "{}"},
+                    }
+                ],
+            }
+        ]
+        config = LLMConfig(
+            endpoint="https://generativelanguage.googleapis.com/v1beta/openai",
+            model="gemini-3.1-pro-preview",
+        )
+        out = ensure_gemini_tool_signatures(messages, config)
+        sig = out[0]["tool_calls"][0]["extra_content"]["google"]["thought_signature"]
+        assert sig == GEMINI_SKIP_THOUGHT_SIGNATURE
+
+    def test_ensure_gemini_preserves_existing_signature(self):
+        from edge_train.agent.llm import LLMConfig, ensure_gemini_tool_signatures
+
+        existing = {"google": {"thought_signature": "real-signature"}}
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "scan_datasets", "arguments": "{}"},
+                        "extra_content": existing,
+                    }
+                ],
+            }
+        ]
+        config = LLMConfig(
+            endpoint="https://generativelanguage.googleapis.com/v1beta/openai",
+            model="gemini-3.1-pro-preview",
+        )
+        out = ensure_gemini_tool_signatures(messages, config)
+        assert out[0]["tool_calls"][0]["extra_content"] == existing
+
+    def test_chat_preserves_tool_call_extra_content(self, monkeypatch):
+        from edge_train.agent.llm import LLMClient, LLMConfig
+
+        captured: dict = {}
+
+        class FakeResp:
+            status_code = 200
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            @staticmethod
+            def json():
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_abc",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "recommend_datasets",
+                                            "arguments": "{}",
+                                        },
+                                        "extra_content": {
+                                            "google": {"thought_signature": "sig-123"}
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+
+        def fake_post(url, headers, json, timeout):
+            captured["messages"] = json["messages"]
+            return FakeResp()
+
+        monkeypatch.setattr("edge_train.agent.llm.requests.post", fake_post)
+        client = LLMClient(
+            LLMConfig(
+                api_key="test",
+                endpoint="https://generativelanguage.googleapis.com/v1beta/openai",
+                model="gemini-3.1-pro-preview",
+            )
+        )
+        history = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {
+                            "name": "recommend_datasets",
+                            "arguments": "{}",
+                        },
+                        "extra_content": {"google": {"thought_signature": "sig-123"}},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_abc", "content": "ok"},
+        ]
+        resp = client.chat(history, tools=[{"type": "function", "function": {}}])
+        assert resp.tool_calls
+        assert resp.tool_calls[0].extra_content == {
+            "google": {"thought_signature": "sig-123"}
+        }
+        assert (
+            captured["messages"][0]["tool_calls"][0]["extra_content"]["google"][
+                "thought_signature"
+            ]
+            == "sig-123"
+        )
+
+    def test_build_assistant_tool_calls_message(self):
+        from edge_train.agent.llm import (
+            LLMResponse,
+            ToolCall,
+            build_assistant_tool_calls_message,
+        )
+
+        msg = build_assistant_tool_calls_message(
+            LLMResponse(
+                content="",
+                reasoning_content="think",
+                tool_calls=[
+                    ToolCall(
+                        id="call_x",
+                        name="scan_datasets",
+                        arguments={},
+                        extra_content={"google": {"thought_signature": "sig-123"}},
+                    )
+                ],
+            )
+        )
+        assert msg["reasoning_content"] == "think"
+        assert msg["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == (
+            "sig-123"
+        )
+
+
 class TestLLMConfig:
     def test_from_env_defaults(self, clear_env):
         from edge_train.agent.llm import LLMConfig
@@ -262,22 +435,48 @@ class TestLLMConfig:
         assert config.api_key == ""
         assert config.model == "gpt-4o"
 
-    def test_ensure_llm_client_non_tty_manual_mode(self, monkeypatch, clear_env):
+    def test_ensure_llm_client_non_tty_exits_without_key(self, monkeypatch, clear_env):
         from edge_train.agent.llm import LLMConfig, ensure_llm_client
 
         monkeypatch.setattr("edge_train.agent.llm.sys.stdout.isatty", lambda: False)
         monkeypatch.setattr("edge_train.agent.llm.sys.stdin.isatty", lambda: False)
-        messages: list[str] = []
 
-        llm, ready = ensure_llm_client(
-            LLMConfig(),
+        with pytest.raises(SystemExit) as exc:
+            ensure_llm_client(
+                LLMConfig(),
+                lambda label, *, default="": "",
+                is_tty=False,
+            )
+        assert exc.value.code == 1
+
+    def test_ensure_llm_client_persists_valid_env_config(
+        self, monkeypatch, clear_env, tmp_path
+    ):
+        from edge_train import config as cfg
+        from edge_train.agent.llm import LLMConfig, ensure_llm_client
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setattr(cfg, "_PKG_ROOT", repo)
+        monkeypatch.setenv("CORALFLOW_LLM_API_KEY", "sk-from-env")
+        monkeypatch.setenv("CORALFLOW_LLM_ENDPOINT", "https://api.example/v1")
+        monkeypatch.setenv("CORALFLOW_LLM_MODEL", "gpt-test")
+
+        monkeypatch.setattr(
+            "edge_train.agent.llm.LLMClient.verify_connection",
+            lambda self: (True, ""),
+        )
+
+        llm = ensure_llm_client(
+            LLMConfig.from_env(),
             lambda label, *, default="": "",
-            echo=messages.append,
             is_tty=False,
         )
-        assert ready is False
-        assert llm.config.api_key == ""
-        assert any("not set" in m for m in messages)
+        assert llm.config.api_key == "sk-from-env"
+        text = (repo / ".env").read_text(encoding="utf-8")
+        assert "CORALFLOW_LLM_API_KEY=sk-from-env" in text
+        assert "CORALFLOW_LLM_ENDPOINT=https://api.example/v1" in text
+        assert "CORALFLOW_LLM_MODEL=gpt-test" in text
 
 
 class TestManualToolInput:
@@ -316,21 +515,16 @@ class TestCLIAgent:
         assert "--api-key" in result.output
         assert "--resume" in result.output
 
-    def test_starts_without_api_key_in_manual_mode(self, monkeypatch, clear_env):
+    def test_exits_without_api_key(self, monkeypatch, clear_env):
         from edge_train.cli.agent import agent
         from click.testing import CliRunner
 
-        monkeypatch.setattr(
-            "edge_train.agent.loop.run_agent_loop",
-            lambda *args, **kwargs: None,
-        )
-
         runner = CliRunner()
         result = runner.invoke(agent, [])
-        assert result.exit_code == 0
-        assert "LLM API key is not set" in result.output or result.exit_code == 0
+        assert result.exit_code == 1
+        assert "LLM API key is not set" in result.output
 
-    def test_starts_on_connection_failure_in_manual_mode(self, monkeypatch, clear_env):
+    def test_exits_on_connection_failure(self, monkeypatch, clear_env):
         from edge_train.cli.agent import agent
         from click.testing import CliRunner
 
@@ -339,14 +533,10 @@ class TestCLIAgent:
             "edge_train.agent.llm.LLMClient.verify_connection",
             lambda self: (False, "Error: LLM request failed: unauthorized"),
         )
-        monkeypatch.setattr(
-            "edge_train.agent.loop.run_agent_loop",
-            lambda *args, **kwargs: None,
-        )
 
         runner = CliRunner()
         result = runner.invoke(agent, [])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "LLM connection failed" in result.output
 
     def test_api_key_cli_flag_passes_validation(self, monkeypatch, clear_env):
@@ -356,6 +546,10 @@ class TestCLIAgent:
         monkeypatch.setattr(
             "edge_train.agent.llm.LLMClient.verify_connection",
             lambda self: (True, ""),
+        )
+        monkeypatch.setattr(
+            "edge_train.agent.google_env.ensure_google_env_at_startup",
+            lambda *args, **kwargs: False,
         )
         monkeypatch.setattr(
             "edge_train.agent.loop.run_agent_loop",
@@ -759,7 +953,7 @@ class TestRunShell:
 
         calls = []
 
-        def fake_stream(argv, timeout=300):
+        def fake_stream(argv, timeout=300, *, skip_phoenix=False):
             calls.append((argv, timeout))
             return "epoch 1/10", 0
 
