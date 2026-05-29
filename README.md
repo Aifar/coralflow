@@ -7,11 +7,10 @@ Seamlessly train, validate, and deploy models to edge devices via CLI. With buil
 **Version:** 0.4.0 · **License:** MIT
 
 ```
-pip install -e ".[dev]"
-coralflow init list
-coralflow train -d ./data/urgent.csv -o ./model_output
-coralflow predict --model ./model_output --text "urgent meeting now"
-coralflow agent
+git clone <repo> && cd coralflow
+cp .env.example .env          # optional
+./scripts/dev pip install -e .
+coralflow demo retrain-loop   # no API keys required
 ```
 
 ## What it does
@@ -31,18 +30,43 @@ coralflow agent
 
 ## Quick start
 
-### Install (development)
+### Install
+
+**Requirements:** Python 3.10+, Linux or macOS (WSL2 works). First install pulls TensorFlow and may take a few minutes.
 
 ```bash
 git clone <repo>
 cd coralflow
-./scripts/dev pip install -e ".[dev]"
-# or: make install
+cp .env.example .env    # optional — local train/predict need no keys
+./scripts/dev pip install -e .
+coralflow --help
 ```
 
-`scripts/dev` creates and activates `.venv` automatically (`uv venv` if available, else `python3 -m venv`).
+`scripts/dev` creates `.venv` automatically (`uv venv` if available, else `python3 -m venv`).
 
-### Train locally (no cloud keys)
+**Contributors** (pytest, black, Flask gateway dev deps):
+
+```bash
+make install    # same as: ./scripts/dev pip install -e ".[dev]"
+```
+
+**Install from GitHub without cloning** (same package, no editable mode):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install "git+https://github.com/<your-org>/coralflow.git"
+coralflow --help
+```
+
+### Try it (no API keys)
+
+Fastest path — built-in dataset, full retrain demo:
+
+```bash
+coralflow demo retrain-loop
+```
+
+Step-by-step local workflow:
 
 ```bash
 coralflow init download urgent -o ./data
@@ -51,20 +75,42 @@ coralflow validate --model ./model_output
 coralflow predict --model ./model_output --text "need this done today"
 ```
 
-### Cloud training (GCP)
+### Configure optional features
+
+Copy `.env.example` to `.env` and uncomment what you need:
+
+| Goal | Variables to set |
+|------|------------------|
+| Cloud training | `GCP_PROJECT`, `GCP_STAGING_BUCKET`, credentials (see below) |
+| Deploy to edge | `EDGE_DEVICES`, `EDGE_DEFAULT_DEVICE` |
+| Phoenix tracing | `PHOENIX_COLLECTOR_ENDPOINT` (+ `PHOENIX_API_KEY` for cloud) |
+| LLM agent | `CORALFLOW_LLM_API_KEY` |
+
+**Cloud training (GCP)** — add to `.env` or export:
 
 ```bash
-export GCP_PROJECT=your-project
-export GCP_STAGING_BUCKET=gs://your-bucket
+# In .env:
+# GCP_PROJECT=your-project
+# GCP_STAGING_BUCKET=gs://your-bucket
+# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 coralflow train -d ./data/urgent.csv --cloud
 ```
 
-### Interactive agent
+Or use Application Default Credentials: `gcloud auth application-default login`.
 
-Requires an OpenAI-compatible API key:
+**Edge deploy** — point at a gateway running `examples/edge_gateway`:
 
 ```bash
-export CORALFLOW_LLM_API_KEY=sk-...
+# In .env:
+# EDGE_DEVICES=[{"device_id":"gw1","host":"127.0.0.1","port":8080}]
+# EDGE_DEFAULT_DEVICE=gw1
+coralflow deploy --model ./model_output
+```
+
+**Interactive agent** — requires an OpenAI-compatible API key in `.env`:
+
+```bash
+# CORALFLOW_LLM_API_KEY=sk-...
 coralflow agent
 # optional: coralflow agent --model gpt-4o-mini
 ```
@@ -120,22 +166,34 @@ Uses `builtin:urgent` by default. With `--hard` (default), the baseline never se
 
 ## Configuration
 
+Start from the template:
+
+```bash
+cp .env.example .env
+```
+
+See [`.env.example`](.env.example) for commented examples (GCP, Phoenix, edge gateways, LLM agent).
+
 | Variable | Description |
 |----------|-------------|
 | `GCP_PROJECT` | Google Cloud project (cloud training) |
 | `GCP_LOCATION` | GCP region (default: `us-central1`) |
 | `GCP_STAGING_BUCKET` | GCS bucket for cloud datasets |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account JSON (optional with ADC) |
+| `GCP_VERTEX_MACHINE_TYPE` | Vertex deploy machine type (default: `n1-standard-2`) |
 | `PHOENIX_API_KEY` | Phoenix Cloud API key |
-| `PHOENIX_COLLECTOR_ENDPOINT` | OTEL trace endpoint |
+| `PHOENIX_COLLECTOR_ENDPOINT` | OTEL trace endpoint (local or cloud) |
 | `PHOENIX_PROJECT_NAME` | Project name in Phoenix (default: `edge-train`) |
-| `EDGE_DEVICES` | Edge gateways in `.env` — JSON array or `id@host:port,...` |
+| `EDGE_DEVICES` | Edge gateways — JSON array or `id@host:port,...` |
 | `EDGE_DEFAULT_DEVICE` | Default gateway id for `coralflow deploy` |
 | `EDGE_REGISTRY_PATH` | Legacy JSON registry fallback (optional) |
-| `EDGE_MODEL_PATH` | Edge gateway model file path (default: `/var/lib/coralflow/model.tflite`) |
+| `EDGE_MODEL_PATH` | Edge gateway model file path (gateway server only) |
 | `EDGE_PREDICTION_LOG_PATH` | Prediction log path (default: `./prediction_log.jsonl`) |
 | `CORALFLOW_LLM_API_KEY` | LLM API key (required for `coralflow agent`) |
 | `CORALFLOW_LLM_ENDPOINT` | OpenAI-compatible API base URL |
 | `CORALFLOW_LLM_MODEL` | Model name (default: `gpt-4o`) |
+| `CORALFLOW_TRAINING_HISTORY_PATH` | Override training history JSON path |
+| `CORALFLOW_DEPLOYMENTS_PATH` | Override cloud deployment registry path |
 
 ## Development
 
