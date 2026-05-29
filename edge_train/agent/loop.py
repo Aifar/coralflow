@@ -7,8 +7,17 @@ import secrets
 import shlex
 from typing import TYPE_CHECKING
 
-from edge_train.agent.llm import format_llm_setup_hint, is_llm_error_response
-from edge_train.agent.tools import TOOLS, execute_tool
+from edge_train.agent.llm import (
+    format_llm_setup_hint,
+    is_llm_error_response,
+    prompt_llm_config_interactive,
+)
+from edge_train.agent.tools import (
+    TOOLS,
+    collect_tool_arguments_interactive,
+    execute_tool,
+    list_tool_names,
+)
 from edge_train.agent.ui import CoralFlowUI
 
 if TYPE_CHECKING:
@@ -104,17 +113,127 @@ def _prepare_messages_for_llm(messages: list[dict]) -> list[dict]:
     return prepared
 
 
+def _llm_prompt_fn(ui: CoralFlowUI):
+    def _prompt(label: str, *, default: str = "") -> str:
+        if default:
+            ui.info(f"Default: {default}")
+        try:
+            return ui.prompt(label)
+        except (EOFError, KeyboardInterrupt):
+            return "skip" if "API key" in label else default
+
+    return _prompt
+
+
+def _llm_ready(llm: "LLMClient | None", llm_enabled: bool) -> bool:
+    return bool(llm_enabled and llm and llm.config.is_valid())
+
+
 def _show_llm_setup_help(llm: "LLMClient", ui: CoralFlowUI, detail: str) -> None:
     ui.error(detail)
     ui.panel(format_llm_setup_hint(llm.config), title="Configure LLM")
 
 
-def _run_llm_turn(messages: list[dict], llm: "LLMClient", ui: CoralFlowUI) -> None:
-    """Call LLM until no more tool calls; append all messages and print responses."""
+def _run_manual_command(ui: CoralFlowUI, llm: "LLMClient | None") -> None:
+    """Let the user pick a tool and enter each parameter via the CLI."""
+    names = list_tool_names()
+    ui.panel(
+        "LLM is unavailable — enter a command manually.\n"
+        "Pick a tool below; you will be prompted for each parameter.",
+        title="Manual mode",
+    )
+    for i, name in enumerate(names, 1):
+        schema = next(t["function"] for t in TOOLS if t["function"]["name"] == name)
+        ui.info(f"  {i}. {name} — {schema.get('description', '')[:80]}")
+
+    try:
+        choice = ui.prompt("Tool number or name").strip()
+    except (EOFError, KeyboardInterrupt):
+        return
+
+    tool_name = None
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(names):
+            tool_name = names[idx - 1]
+    elif choice in names:
+        tool_name = choice
+
+    if not tool_name:
+        ui.error(f"Unknown tool: {choice}")
+        return
+
+    def arg_prompt(label: str) -> str:
+        return ui.prompt(label)
+
+    arguments = collect_tool_arguments_interactive(tool_name, arg_prompt)
+    if arguments is None:
+        ui.error(f"Unknown tool: {tool_name}")
+        return
+
+    ui.tool_start(tool_name)
+    result = execute_tool(tool_name, arguments, llm=llm)
+    ui.separator()
+    ui.markdown(result)
+    ui.separator()
+
+
+def _offer_llm_recovery_or_manual(
+    ui: CoralFlowUI, llm: "LLMClient", llm_enabled: bool, detail: str
+) -> tuple[bool, bool]:
+    """Handle LLM failure without exiting. Returns (llm_enabled, retry_turn)."""
+    _show_llm_setup_help(llm, ui, detail)
+    ui.info(
+        "Options:\n"
+        "  1 — Reconfigure LLM (enter api_key, endpoint, model)\n"
+        "  2 — Run a command manually (enter parameters step by step)\n"
+        "  3 — Return to prompt"
+    )
+    try:
+        choice = ui.prompt("choice").strip()
+    except (EOFError, KeyboardInterrupt):
+        return llm_enabled, False
+
+    if choice == "1":
+        config = prompt_llm_config_interactive(llm.config, _llm_prompt_fn(ui))
+        llm.config = config
+        if not config.is_valid():
+            ui.info("Continuing in manual mode.")
+            return False, False
+        ok, err = llm.verify_connection()
+        if ok:
+            ui.success("LLM connected.")
+            return True, True
+        _show_llm_setup_help(llm, ui, err)
+        return False, False
+
+    if choice == "2":
+        _run_manual_command(ui, llm)
+        return llm_enabled, False
+
+    return llm_enabled, False
+
+
+def _run_llm_turn(
+    messages: list[dict],
+    llm: "LLMClient",
+    ui: CoralFlowUI,
+    llm_enabled: bool,
+) -> tuple[bool, bool]:
+    """Call LLM until no more tool calls. Returns (llm_enabled, completed)."""
+    if not _llm_ready(llm, llm_enabled):
+        ui.info("LLM is not available — use manual command entry.")
+        _run_manual_command(ui, llm)
+        return llm_enabled, False
+
     resp = llm.chat(_prepare_messages_for_llm(messages), TOOLS)
     if is_llm_error_response(resp):
-        _show_llm_setup_help(llm, ui, resp.content or "LLM request failed.")
-        return
+        llm_enabled, retry = _offer_llm_recovery_or_manual(
+            ui, llm, llm_enabled, resp.content or "LLM request failed."
+        )
+        if retry and _llm_ready(llm, llm_enabled):
+            return _run_llm_turn(messages, llm, ui, llm_enabled)
+        return llm_enabled, False
 
     while resp.tool_calls:
         tc_msg: dict = {
@@ -162,17 +281,27 @@ def _run_llm_turn(messages: list[dict], llm: "LLMClient", ui: CoralFlowUI) -> No
 
         resp = llm.chat(_prepare_messages_for_llm(messages), TOOLS)
         if is_llm_error_response(resp):
-            _show_llm_setup_help(llm, ui, resp.content or "LLM request failed.")
-            return
+            llm_enabled, retry = _offer_llm_recovery_or_manual(
+                ui, llm, llm_enabled, resp.content or "LLM request failed."
+            )
+            if retry and _llm_ready(llm, llm_enabled):
+                return _run_llm_turn(messages, llm, ui, llm_enabled)
+            return llm_enabled, False
 
     if resp.content:
         messages.append(_assistant_msg(resp))
         ui.markdown(resp.content)
         ui.separator()
 
+    return llm_enabled, True
+
 
 def run_agent_loop(
-    llm: "LLMClient", state, scan_result: str = "", ctx_summary: str = ""
+    llm: "LLMClient | None",
+    state,
+    scan_result: str = "",
+    ctx_summary: str = "",
+    llm_enabled: bool = True,
 ):
     """Main REPL: prompt → LLM → tools → response → repeat.
 
@@ -198,8 +327,13 @@ def run_agent_loop(
         messages.append({"role": "system", "content": f"Startup scan:\n{scan_result}"})
 
     # Banner
+    mode_line = (
+        "LLM-powered — natural language and slash commands"
+        if _llm_ready(llm, llm_enabled)
+        else "Manual mode — LLM unavailable; use `/help`, slash commands, or step-by-step prompts"
+    )
     banner = (
-        "TinyML continuous training — LLM-powered\n\n"
+        f"TinyML continuous training — {mode_line}\n\n"
         + (f"{ctx_summary}\n\n" if ctx_summary else "")
         + "Type `/help` for commands, `/exit` to quit."
     )
@@ -243,12 +377,20 @@ def run_agent_loop(
             ui.separator()
             ui.markdown(result_text)
 
-            _run_llm_turn(messages, llm, ui)
+            if _llm_ready(llm, llm_enabled) and llm is not None:
+                llm_enabled, _ = _run_llm_turn(messages, llm, ui, llm_enabled)
             continue
 
-        # ── Normal text → LLM decides tools ─────────────────────────
+        # ── Normal text → LLM decides tools (or manual fallback) ──
         messages.append({"role": "user", "content": user_input})
-        _run_llm_turn(messages, llm, ui)
+        if _llm_ready(llm, llm_enabled) and llm is not None:
+            llm_enabled, _ = _run_llm_turn(messages, llm, ui, llm_enabled)
+        else:
+            ui.info(
+                "LLM is not available for natural language. "
+                "Use a slash command (e.g. `/train -d data.csv`) or manual entry."
+            )
+            _run_manual_command(ui, llm)
 
         # Keep conversation bounded
         if len(messages) > 40:

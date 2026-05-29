@@ -272,6 +272,54 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+# ── Tool lookup / manual input helpers ─────────────────────────────────────
+
+
+def get_tool_schema(name: str) -> dict[str, Any] | None:
+    """Return the OpenAI function schema for a tool name, or None."""
+    for tool in TOOLS:
+        func = tool.get("function", {})
+        if func.get("name") == name:
+            return func
+    return None
+
+
+def list_tool_names() -> list[str]:
+    return [t["function"]["name"] for t in TOOLS]
+
+
+def collect_tool_arguments_interactive(
+    tool_name: str, prompt_fn: Callable[[str], str]
+) -> dict[str, Any] | None:
+    """Prompt the user for each tool parameter on the command line."""
+    schema = get_tool_schema(tool_name)
+    if schema is None:
+        return None
+
+    params = schema.get("parameters", {})
+    properties: dict[str, Any] = params.get("properties", {})
+    required = set(params.get("required", []))
+    arguments: dict[str, Any] = {}
+
+    for prop_name, prop_schema in properties.items():
+        desc = prop_schema.get("description", prop_name)
+        optional = prop_name not in required
+        label = f"{prop_name} ({desc})"
+        if optional:
+            label += " [optional, Enter to skip]"
+
+        while True:
+            value = prompt_fn(label).strip()
+            if not value:
+                if optional:
+                    break
+                continue
+            arguments[prop_name] = value
+            break
+
+    return arguments
+
+
 # ── Tool executors ──────────────────────────────────────────────────────────
 
 

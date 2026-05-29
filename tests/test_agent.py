@@ -240,6 +240,67 @@ class TestLLMConfig:
         assert not ok
         assert "401" in err
 
+    def test_prompt_llm_config_interactive(self):
+        from edge_train.agent.llm import LLMConfig, prompt_llm_config_interactive
+
+        answers = iter(["sk-new", "https://custom.example/v1", "gpt-4o-mini"])
+        config = prompt_llm_config_interactive(
+            LLMConfig(),
+            lambda label, *, default="": next(answers),
+        )
+        assert config.api_key == "sk-new"
+        assert config.endpoint == "https://custom.example/v1"
+        assert config.model == "gpt-4o-mini"
+
+    def test_prompt_llm_config_skip_clears_key(self):
+        from edge_train.agent.llm import LLMConfig, prompt_llm_config_interactive
+
+        config = prompt_llm_config_interactive(
+            LLMConfig(api_key="sk-old", model="gpt-4o"),
+            lambda label, *, default="": "skip",
+        )
+        assert config.api_key == ""
+        assert config.model == "gpt-4o"
+
+    def test_ensure_llm_client_non_tty_manual_mode(self, monkeypatch, clear_env):
+        from edge_train.agent.llm import LLMConfig, ensure_llm_client
+
+        monkeypatch.setattr("edge_train.agent.llm.sys.stdout.isatty", lambda: False)
+        monkeypatch.setattr("edge_train.agent.llm.sys.stdin.isatty", lambda: False)
+        messages: list[str] = []
+
+        llm, ready = ensure_llm_client(
+            LLMConfig(),
+            lambda label, *, default="": "",
+            echo=messages.append,
+            is_tty=False,
+        )
+        assert ready is False
+        assert llm.config.api_key == ""
+        assert any("not set" in m for m in messages)
+
+
+class TestManualToolInput:
+    def test_collect_tool_arguments_required_only(self):
+        from edge_train.agent.tools import collect_tool_arguments_interactive
+
+        answers = iter(["data/urgent.csv"])
+        args = collect_tool_arguments_interactive(
+            "analyze_dataset",
+            lambda label: next(answers, ""),
+        )
+        assert args == {"path": "data/urgent.csv"}
+
+    def test_collect_tool_arguments_skips_optional(self):
+        from edge_train.agent.tools import collect_tool_arguments_interactive
+
+        answers = iter(["data/urgent.csv", "", "", ""])
+        args = collect_tool_arguments_interactive(
+            "train_model",
+            lambda label: next(answers, ""),
+        )
+        assert args == {"dataset_path": "data/urgent.csv"}
+
 
 class TestCLIAgent:
     def test_help(self):
@@ -255,17 +316,21 @@ class TestCLIAgent:
         assert "--api-key" in result.output
         assert "--resume" in result.output
 
-    def test_exits_without_api_key(self, clear_env):
+    def test_starts_without_api_key_in_manual_mode(self, monkeypatch, clear_env):
         from edge_train.cli.agent import agent
         from click.testing import CliRunner
 
+        monkeypatch.setattr(
+            "edge_train.agent.loop.run_agent_loop",
+            lambda *args, **kwargs: None,
+        )
+
         runner = CliRunner()
         result = runner.invoke(agent, [])
-        assert result.exit_code == 1
-        assert "CORALFLOW_LLM_API_KEY" in result.output
-        assert "coralflow agent --api-key" in result.output
+        assert result.exit_code == 0
+        assert "LLM API key is not set" in result.output or result.exit_code == 0
 
-    def test_exits_on_connection_failure(self, monkeypatch, clear_env):
+    def test_starts_on_connection_failure_in_manual_mode(self, monkeypatch, clear_env):
         from edge_train.cli.agent import agent
         from click.testing import CliRunner
 
@@ -274,12 +339,15 @@ class TestCLIAgent:
             "edge_train.agent.llm.LLMClient.verify_connection",
             lambda self: (False, "Error: LLM request failed: unauthorized"),
         )
+        monkeypatch.setattr(
+            "edge_train.agent.loop.run_agent_loop",
+            lambda *args, **kwargs: None,
+        )
 
         runner = CliRunner()
         result = runner.invoke(agent, [])
-        assert result.exit_code == 1
+        assert result.exit_code == 0
         assert "LLM connection failed" in result.output
-        assert "coralflow agent --api-key" in result.output
 
     def test_api_key_cli_flag_passes_validation(self, monkeypatch, clear_env):
         from edge_train.cli.agent import agent

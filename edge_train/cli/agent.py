@@ -1,7 +1,5 @@
 """agent command — LLM-powered interactive agent for CoralFlow."""
 
-import sys
-
 import click
 
 
@@ -21,14 +19,18 @@ def agent(
     The agent discovers datasets, assesses local resources, validates data,
     trains models, and deploys — all through natural conversation.
 
-    Requires CORALFLOW_LLM_API_KEY to be set.
+    If the LLM is not configured or unreachable, you can enter settings or
+    run commands manually without exiting.
     """
     from edge_train.config import load_config
-    from edge_train.agent.llm import LLMClient, LLMConfig, format_llm_setup_hint
+    from edge_train.agent.llm import LLMConfig, ensure_llm_client
     from edge_train.agent.loop import run_agent_loop
+    from edge_train.agent.ui import CoralFlowUI
     from edge_train.agent import AgentState, DatasetScanner, scan_models
 
     load_config()  # load .env (GCP + LLM keys) before REPL / subprocess tools
+
+    ui = CoralFlowUI()
 
     # Load config
     config = LLMConfig.from_env()
@@ -40,25 +42,26 @@ def agent(
     if endpoint:
         config.endpoint = endpoint
 
-    if not config.is_valid():
-        click.echo("Error: LLM API key is not set.\n", err=True)
-        click.echo(format_llm_setup_hint(config), err=True)
-        sys.exit(1)
+    def _echo(msg: str) -> None:
+        ui.error(msg.strip())
 
-    llm = LLMClient(config)
-    ok, err = llm.verify_connection()
-    if not ok:
-        click.echo(f"Error: LLM connection failed.\n{err}\n", err=True)
-        click.echo(format_llm_setup_hint(config), err=True)
-        sys.exit(1)
+    llm, llm_enabled = ensure_llm_client(
+        config,
+        _llm_prompt_fn(ui),
+        echo=_echo,
+    )
 
     # Load agent state
     state = AgentState.load()
 
     # Build context for the loop banner
-    ctx_parts = [f"LLM: {config.model}"]
-    if config.endpoint != "https://api.openai.com/v1":
-        ctx_parts.append(f"Endpoint: {config.endpoint}")
+    ctx_parts = []
+    if llm_enabled:
+        ctx_parts.append(f"LLM: {llm.config.model}")
+        if llm.config.endpoint != "https://api.openai.com/v1":
+            ctx_parts.append(f"Endpoint: {llm.config.endpoint}")
+    else:
+        ctx_parts.append("LLM: manual mode")
 
     if not resume:
         datasets = DatasetScanner.scan()
@@ -104,6 +107,18 @@ def agent(
     ctx_summary = " | ".join(ctx_parts)
 
     try:
-        run_agent_loop(llm, state, scan_result, ctx_summary)
+        run_agent_loop(llm, state, scan_result, ctx_summary, llm_enabled=llm_enabled)
     except KeyboardInterrupt:
         click.echo()
+
+
+def _llm_prompt_fn(ui):
+    def _prompt(label: str, *, default: str = "") -> str:
+        if default:
+            ui.info(f"Default: {default}")
+        try:
+            return ui.prompt(label)
+        except (EOFError, KeyboardInterrupt):
+            return "skip" if "API key" in label else default
+
+    return _prompt
