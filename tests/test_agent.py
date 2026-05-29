@@ -197,6 +197,49 @@ class TestLLMConfig:
         assert config.model == "gpt-4o-mini"
         assert config.is_valid()
 
+    def test_format_llm_setup_hint_includes_cli_flags(self):
+        from edge_train.agent.llm import LLMConfig, format_llm_setup_hint
+
+        hint = format_llm_setup_hint(LLMConfig(model="gpt-4o-mini"))
+        assert "CORALFLOW_LLM_API_KEY" in hint
+        assert "coralflow agent --api-key" in hint
+        assert "gpt-4o-mini" in hint
+
+    def test_is_llm_error_response(self):
+        from edge_train.agent.llm import LLMResponse, is_llm_error_response
+
+        assert is_llm_error_response(LLMResponse(content="Error: timeout"))
+        assert not is_llm_error_response(LLMResponse(content="Hello"))
+        assert not is_llm_error_response(LLMResponse(content=None))
+
+    def test_verify_connection_success(self, monkeypatch):
+        from edge_train.agent.llm import LLMClient, LLMConfig, LLMResponse
+
+        client = LLMClient(LLMConfig(api_key="sk-test"))
+        monkeypatch.setattr(
+            client,
+            "chat",
+            lambda messages, tools=None: LLMResponse(content="pong"),
+        )
+        ok, err = client.verify_connection()
+        assert ok
+        assert err == ""
+
+    def test_verify_connection_failure(self, monkeypatch):
+        from edge_train.agent.llm import LLMClient, LLMConfig, LLMResponse
+
+        client = LLMClient(LLMConfig(api_key="sk-test"))
+        monkeypatch.setattr(
+            client,
+            "chat",
+            lambda messages, tools=None: LLMResponse(
+                content="Error: LLM request failed: 401"
+            ),
+        )
+        ok, err = client.verify_connection()
+        assert not ok
+        assert "401" in err
+
 
 class TestCLIAgent:
     def test_help(self):
@@ -209,6 +252,7 @@ class TestCLIAgent:
         assert "LLM-powered" in result.output
         assert "--model" in result.output
         assert "--endpoint" in result.output
+        assert "--api-key" in result.output
         assert "--resume" in result.output
 
     def test_exits_without_api_key(self, clear_env):
@@ -219,6 +263,40 @@ class TestCLIAgent:
         result = runner.invoke(agent, [])
         assert result.exit_code == 1
         assert "CORALFLOW_LLM_API_KEY" in result.output
+        assert "coralflow agent --api-key" in result.output
+
+    def test_exits_on_connection_failure(self, monkeypatch, clear_env):
+        from edge_train.cli.agent import agent
+        from click.testing import CliRunner
+
+        monkeypatch.setenv("CORALFLOW_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(
+            "edge_train.agent.llm.LLMClient.verify_connection",
+            lambda self: (False, "Error: LLM request failed: unauthorized"),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(agent, [])
+        assert result.exit_code == 1
+        assert "LLM connection failed" in result.output
+        assert "coralflow agent --api-key" in result.output
+
+    def test_api_key_cli_flag_passes_validation(self, monkeypatch, clear_env):
+        from edge_train.cli.agent import agent
+        from click.testing import CliRunner
+
+        monkeypatch.setattr(
+            "edge_train.agent.llm.LLMClient.verify_connection",
+            lambda self: (True, ""),
+        )
+        monkeypatch.setattr(
+            "edge_train.agent.loop.run_agent_loop",
+            lambda *args, **kwargs: None,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(agent, ["--api-key", "sk-from-cli"])
+        assert result.exit_code == 0
 
     def test_resume_flag_accepted(self):
         from edge_train.cli.agent import agent

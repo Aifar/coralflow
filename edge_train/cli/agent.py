@@ -6,10 +6,16 @@ import click
 
 
 @click.command()
+@click.option("--api-key", "-k", default=None, help="LLM API key override")
 @click.option("--model", "-m", default=None, help="LLM model override")
 @click.option("--endpoint", default=None, help="LLM API endpoint override")
 @click.option("--resume", is_flag=True, help="Skip scan, resume from last state")
-def agent(model: str | None, endpoint: str | None, resume: bool):
+def agent(
+    api_key: str | None,
+    model: str | None,
+    endpoint: str | None,
+    resume: bool,
+):
     """Start the interactive LLM-powered CoralFlow agent.
 
     The agent discovers datasets, assesses local resources, validates data,
@@ -18,7 +24,7 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
     Requires CORALFLOW_LLM_API_KEY to be set.
     """
     from edge_train.config import load_config
-    from edge_train.agent.llm import LLMClient, LLMConfig
+    from edge_train.agent.llm import LLMClient, LLMConfig, format_llm_setup_hint
     from edge_train.agent.loop import run_agent_loop
     from edge_train.agent import AgentState, DatasetScanner, scan_models
 
@@ -27,22 +33,23 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
     # Load config
     config = LLMConfig.from_env()
 
+    if api_key:
+        config.api_key = api_key
     if model:
         config.model = model
     if endpoint:
         config.endpoint = endpoint
 
     if not config.is_valid():
-        click.echo(
-            "Error: CORALFLOW_LLM_API_KEY is not set.\n"
-            "Set it in your environment or .env file:\n"
-            "  export CORALFLOW_LLM_API_KEY=sk-...\n"
-            "\n"
-            "Optional:\n"
-            "  CORALFLOW_LLM_ENDPOINT  (default: https://api.openai.com/v1)\n"
-            "  CORALFLOW_LLM_MODEL      (default: gpt-4o)",
-            err=True,
-        )
+        click.echo("Error: LLM API key is not set.\n", err=True)
+        click.echo(format_llm_setup_hint(config), err=True)
+        sys.exit(1)
+
+    llm = LLMClient(config)
+    ok, err = llm.verify_connection()
+    if not ok:
+        click.echo(f"Error: LLM connection failed.\n{err}\n", err=True)
+        click.echo(format_llm_setup_hint(config), err=True)
         sys.exit(1)
 
     # Load agent state
@@ -95,9 +102,6 @@ def agent(model: str | None, endpoint: str | None, resume: bool):
         ctx_parts.append(f"Last dataset: {state.dataset_path}")
 
     ctx_summary = " | ".join(ctx_parts)
-
-    # Create LLM client and enter REPL
-    llm = LLMClient(config)
 
     try:
         run_agent_loop(llm, state, scan_result, ctx_summary)

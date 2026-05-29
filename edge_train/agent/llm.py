@@ -27,7 +27,28 @@ class LLMConfig:
         )
 
     def is_valid(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key.strip())
+
+
+def format_llm_setup_hint(config: LLMConfig | None = None) -> str:
+    """Instructions for configuring LLM via environment or CLI flags."""
+    model = config.model if config else "gpt-4o"
+    endpoint = config.endpoint if config else "https://api.openai.com/v1"
+    return (
+        "Configure the LLM via environment or .env:\n"
+        "  export CORALFLOW_LLM_API_KEY=sk-...\n"
+        f"  export CORALFLOW_LLM_ENDPOINT={endpoint}  # optional\n"
+        f"  export CORALFLOW_LLM_MODEL={model}  # optional\n"
+        "\n"
+        "Or pass flags when starting the agent:\n"
+        "  coralflow agent --api-key sk-... "
+        f'--endpoint "{endpoint}" --model {model}'
+    )
+
+
+def is_llm_error_response(resp: "LLMResponse") -> bool:
+    """True when chat() returned a transport/API failure message."""
+    return bool(resp.content and resp.content.startswith("Error:"))
 
 
 @dataclass
@@ -47,6 +68,18 @@ class LLMResponse:
 class LLMClient:
     def __init__(self, config: LLMConfig):
         self.config = config
+
+    def verify_connection(self) -> tuple[bool, str]:
+        """Probe the LLM API with a minimal request. Returns (ok, error_message)."""
+        if not self.config.is_valid():
+            return False, "CORALFLOW_LLM_API_KEY is not set."
+
+        resp = self.chat([{"role": "user", "content": "ping"}], tools=None)
+        if is_llm_error_response(resp):
+            return False, resp.content or "LLM request failed."
+        if resp.content or resp.tool_calls:
+            return True, ""
+        return False, "No response from LLM."
 
     def chat(
         self, messages: list[dict], tools: list[dict] | None = None

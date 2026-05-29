@@ -7,6 +7,7 @@ import secrets
 import shlex
 from typing import TYPE_CHECKING
 
+from edge_train.agent.llm import format_llm_setup_hint, is_llm_error_response
 from edge_train.agent.tools import TOOLS, execute_tool
 from edge_train.agent.ui import CoralFlowUI
 
@@ -103,9 +104,17 @@ def _prepare_messages_for_llm(messages: list[dict]) -> list[dict]:
     return prepared
 
 
+def _show_llm_setup_help(llm: "LLMClient", ui: CoralFlowUI, detail: str) -> None:
+    ui.error(detail)
+    ui.panel(format_llm_setup_hint(llm.config), title="Configure LLM")
+
+
 def _run_llm_turn(messages: list[dict], llm: "LLMClient", ui: CoralFlowUI) -> None:
     """Call LLM until no more tool calls; append all messages and print responses."""
     resp = llm.chat(_prepare_messages_for_llm(messages), TOOLS)
+    if is_llm_error_response(resp):
+        _show_llm_setup_help(llm, ui, resp.content or "LLM request failed.")
+        return
 
     while resp.tool_calls:
         tc_msg: dict = {
@@ -152,6 +161,9 @@ def _run_llm_turn(messages: list[dict], llm: "LLMClient", ui: CoralFlowUI) -> No
             ui.separator()
 
         resp = llm.chat(_prepare_messages_for_llm(messages), TOOLS)
+        if is_llm_error_response(resp):
+            _show_llm_setup_help(llm, ui, resp.content or "LLM request failed.")
+            return
 
     if resp.content:
         messages.append(_assistant_msg(resp))
