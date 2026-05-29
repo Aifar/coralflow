@@ -8,7 +8,11 @@ import click
 
 from edge_train.edge.config import EdgeConfig
 from edge_train.edge.deploy import deploy_model as _deploy_model
-from edge_train.edge.registry import DeviceRegistry
+from edge_train.edge.registry import (
+    DeviceInfo,
+    load_device_registry,
+    resolve_deploy_targets,
+)
 
 
 @click.command()
@@ -19,10 +23,17 @@ from edge_train.edge.registry import DeviceRegistry
     help="Local .tflite path (edge) or Vertex model resource name (with --cloud)",
 )
 @click.option(
-    "--device", "-d", default=None, help="Device ID from registry (edge only)"
+    "--device",
+    "-d",
+    default=None,
+    help="Device ID from EDGE_DEVICES (.env), 'all', or EDGE_DEFAULT_DEVICE if omitted",
 )
-@click.option("--host", default=None, help="Device hostname or IP (edge only)")
-@click.option("--port", default=8080, type=int, help="Device HTTP port (edge only)")
+@click.option(
+    "--host", default=None, help="Device hostname or IP (bypasses .env registry)"
+)
+@click.option(
+    "--port", default=8080, type=int, help="Device HTTP port (with --host only)"
+)
 @click.option("--version", default=None, help="Model version string (edge only)")
 @click.option(
     "--modality",
@@ -34,7 +45,11 @@ from edge_train.edge.registry import DeviceRegistry
 @click.option(
     "--no-verify", is_flag=True, help="Skip checksum verification (edge only)"
 )
-@click.option("--registry", default=None, help="Path to device registry JSON file")
+@click.option(
+    "--list-devices",
+    is_flag=True,
+    help="List edge gateways configured in EDGE_DEVICES (.env) and exit",
+)
 @click.option(
     "--cloud",
     is_flag=True,
@@ -73,7 +88,7 @@ def deploy(
     modality: str,
     timeout: int,
     no_verify: bool,
-    registry: str | None,
+    list_devices: bool,
     cloud: bool,
     machine_type: str | None,
     display_name: str | None,
@@ -82,7 +97,7 @@ def deploy(
 ):
     """Deploy a model for inference.
 
-    Edge (default): push TFLite to a registered device or --host.
+    Edge (default): push TFLite to gateways listed in EDGE_DEVICES (.env).
 
     Vertex (--cloud): deploy a trained Vertex model resource to an endpoint.
     Use coralflow predict --endpoint <endpoint> for Phoenix-monitored inference.
@@ -98,43 +113,114 @@ def deploy(
         )
         return
 
-    if not device and not host:
-        click.echo(
-            "Error: provide --device or --host for edge deploy, or use --cloud for Vertex.",
-            err=True,
-        )
-        sys.exit(1)
+    registry = load_device_registry()
+    if list_devices:
+        _print_edge_devices(registry.list_devices())
+        return
 
     cfg = EdgeConfig(
         connection_timeout_sec=timeout,
         verify_deployment=not no_verify,
     )
 
-    reg = None
-    if device:
-        reg_path = registry or cfg.device_registry_path
-        reg = DeviceRegistry(reg_path)
+    if host:
+        ok = _deploy_edge_single(
+            model=model,
+            device_id=None,
+            host=host,
+            port=port,
+            registry=None,
+            cfg=cfg,
+            version=version,
+            modality=modality,
+            simulate=simulate,
+            simulate_count=simulate_count,
+        )
+        if not ok:
+            sys.exit(1)
+        return
 
-    click.echo("  Packaging model...", nl=False)
-    sys.stdout.flush()
+    try:
+        targets = resolve_deploy_targets(registry, device, cfg.default_device)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    failures = 0
+    for index, target in enumerate(targets):
+        if len(targets) > 1:
+            click.echo(f"  [{index + 1}/{len(targets)}] {target.device_id} ...")
+        ok = _deploy_edge_single(
+            model=model,
+            device_id=target.device_id,
+            host=None,
+            port=target.port,
+            registry=registry,
+            cfg=cfg,
+            version=version,
+            modality=modality,
+            simulate=simulate and len(targets) == 1,
+            simulate_count=simulate_count,
+            quiet_packaging=index > 0,
+        )
+        if not ok:
+            failures += 1
+
+    if failures:
+        sys.exit(1)
+
+
+def _print_edge_devices(devices: list[DeviceInfo]) -> None:
+    if not devices:
+        click.echo("  No edge devices in EDGE_DEVICES (.env).")
+        click.echo(
+            "  Example:\n"
+            '    EDGE_DEVICES=[{"device_id":"line1-gw","host":"192.168.1.50","port":8080}]\n'
+            "    EDGE_DEFAULT_DEVICE=line1-gw"
+        )
+        return
+    click.echo("  Edge gateways (EDGE_DEVICES):")
+    for dev in devices:
+        label = f" — {dev.label}" if dev.label else ""
+        click.echo(f"    {dev.device_id}: http://{dev.host}:{dev.port}{label}")
+
+
+def _deploy_edge_single(
+    *,
+    model: str,
+    device_id: str | None,
+    host: str | None,
+    port: int,
+    registry,
+    cfg: EdgeConfig,
+    version: str | None,
+    modality: str,
+    simulate: bool,
+    simulate_count: int,
+    quiet_packaging: bool = False,
+) -> bool:
+    if not quiet_packaging:
+        click.echo("  Packaging model...", nl=False)
+        sys.stdout.flush()
 
     try:
         result = asyncio.run(
             _deploy_model(
                 model,
-                device_id=device,
+                device_id=device_id,
                 host=host,
                 port=port,
-                registry=reg,
+                registry=registry,
                 edge_config=cfg,
                 version=version,
                 modality=modality,
             )
         )
     except Exception as e:
-        click.echo(" failed.")
+        if not quiet_packaging:
+            click.echo(" failed.")
         click.echo(f"  Error: {e}", err=True)
-        sys.exit(1)
+        return False
 
     if result.success:
         from edge_train.config import load_config
@@ -150,7 +236,8 @@ def deploy(
                 phoenix_project=arize.project_name if arize.is_valid() else "",
             )
         )
-        click.echo(" done.")
+        if not quiet_packaging:
+            click.echo(" done.")
         click.echo(f"  Deployed model to {result.device_id}")
         click.echo(f"  Model: {result.model_path}")
         if result.manifest:
@@ -163,17 +250,19 @@ def deploy(
         from edge_train.deployments import format_phoenix_monitoring_hint
 
         click.echo(format_phoenix_monitoring_hint(model_path=model))
-        _print_simulate_hint(model=_edge_simulate_model_hint(), modality=modality)
         if simulate:
+            _print_simulate_hint(model=_edge_simulate_model_hint(), modality=modality)
             _run_post_deploy_simulate(
                 model=_edge_simulate_model_hint(),
                 modality=modality,
                 count=simulate_count,
             )
-    else:
+        return True
+
+    if not quiet_packaging:
         click.echo(" failed.")
-        click.echo(f"  {result.error}", err=True)
-        sys.exit(1)
+    click.echo(f"  {result.error}", err=True)
+    return False
 
 
 def _deploy_vertex(

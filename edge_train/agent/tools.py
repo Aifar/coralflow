@@ -142,7 +142,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "deploy_model",
-            "description": "Deploy a TFLite model to an edge device.",
+            "description": "Deploy a TFLite model to an edge device (uses EDGE_DEVICES in .env).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -150,16 +150,20 @@ TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "Path to the .tflite model file.",
                     },
+                    "device_id": {
+                        "type": "string",
+                        "description": "Device ID from EDGE_DEVICES, or 'all'. Defaults to EDGE_DEFAULT_DEVICE.",
+                    },
                     "host": {
                         "type": "string",
-                        "description": "Edge device hostname or IP address.",
+                        "description": "Optional: edge device IP/host (overrides .env registry).",
                     },
                     "port": {
                         "type": "integer",
-                        "description": "Edge device port (default: 8080).",
+                        "description": "Edge device port when using host (default: 8080).",
                     },
                 },
-                "required": ["model_path", "host"],
+                "required": ["model_path"],
             },
         },
     },
@@ -728,13 +732,43 @@ def _exec_validate_model(arguments: dict) -> str:
 def _exec_deploy_model(arguments: dict) -> str:
     import asyncio
 
+    from edge_train.edge.config import EdgeConfig
     from edge_train.edge.deploy import deploy_model as edge_deploy
+    from edge_train.edge.registry import load_device_registry, resolve_deploy_targets
 
     model_path = arguments["model_path"]
-    host = arguments["host"]
+    host = arguments.get("host")
     port = arguments.get("port", 8080)
+    device_id = arguments.get("device_id")
+    cfg = EdgeConfig()
+    registry = load_device_registry()
 
-    result = asyncio.run(edge_deploy(model_path, host=host, port=port))
+    if host:
+        result = asyncio.run(
+            edge_deploy(model_path, host=host, port=port, edge_config=cfg)
+        )
+        return _format_deploy_result(result, model_path)
+
+    try:
+        targets = resolve_deploy_targets(registry, device_id, cfg.default_device)
+    except ValueError as exc:
+        return f"Deployment failed: {exc}"
+
+    lines: list[str] = []
+    for target in targets:
+        result = asyncio.run(
+            edge_deploy(
+                model_path,
+                device_id=target.device_id,
+                registry=registry,
+                edge_config=cfg,
+            )
+        )
+        lines.append(_format_deploy_result(result, model_path))
+    return "\n\n".join(lines)
+
+
+def _format_deploy_result(result, model_path: str) -> str:
     if result.success:
         return (
             f"Deployed successfully to **{result.device_id}** in {result.elapsed_sec:.1f}s.\n"

@@ -33,10 +33,12 @@ dependencies = [
 
 [project.scripts]
 coralflow = "edge_train.cli:main"
+coralflow-edge-pipeline = "edge_train.cli.edge_pipeline:main"
 
 [project.optional-dependencies]
 dev = [
     "black>=26.5",
+    "flask>=3.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-mock>=3.14",

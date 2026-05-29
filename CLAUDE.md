@@ -80,8 +80,11 @@ Use the project venv helper so `pip` / `python` never run on the system interpre
 `scripts/ensure_venv.sh` creates `.venv` (via `uv venv` if available, else `python3 -m venv`) and activates it before the command runs.
 
 ### Commits
-- Never include `Co-Authored-By` trailers in commit messages
+- Never include `Co-Authored-By` / `Co-authored-by` trailers in commit messages
+- Never pass `--trailer "Co-authored-by: Cursor <cursoragent@cursor.com>"` to `git commit`
 - Use conventional commit prefixes: `feat:`, `fix:`, `style:`, `test:`, `chore:`
+- If a Cursor co-author trailer appears anyway, amend it out before push:
+  `git log -1 --format=%B | sed '/^Co-authored-by: Cursor <cursoragent@cursor.com>$/d' | git commit --amend -F -`
 
 ### Before pushing
 **Always run locally first — never skip this.** CI failures waste time.
@@ -121,7 +124,11 @@ All config reads from environment variables:
 - `PHOENIX_API_KEY`, `PHOENIX_COLLECTOR_ENDPOINT` — Arize Phoenix OTEL tracing
   - `PHOENIX_PROJECT_NAME` (optional, default: `edge-train`) — project name in Phoenix dashboard
   - `PHOENIX_COLLECTOR_ENDPOINT` defaults to `https://app.phoenix.arize.com/v1/traces`
-- `EDGE_REGISTRY_PATH` — device registry file path
+- `EDGE_DEVICES` — edge gateway list (JSON array or compact `id@host:port,...` in `.env`)
+- `EDGE_DEFAULT_DEVICE` — default gateway id when `--device` is omitted
+- `EDGE_REGISTRY_PATH` — legacy JSON registry fallback (optional; prefer `EDGE_DEVICES`)
+- Edge gateway reference: `examples/edge_gateway/` (Flask + systemd)
+- Edge pipeline: `coralflow-edge-pipeline ./data/urgent.csv` (train → validate → deploy)
 - `EDGE_PREDICTION_LOG_PATH` — prediction log file path (default: `./prediction_log.jsonl`)
 - `CORALFLOW_LLM_ENDPOINT` — LLM API endpoint (default: `https://api.openai.com/v1`)
 - `CORALFLOW_LLM_API_KEY` — LLM API key (required for `coralflow agent`)

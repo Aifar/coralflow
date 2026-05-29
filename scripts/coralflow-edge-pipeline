@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Train → validate → deploy for edge devices.
+# Examples:
+#   ./scripts/coralflow-edge-pipeline ./data/urgent.csv
+#   ./scripts/coralflow-edge-pipeline ./data/urgent.csv --epochs 2 --host 127.0.0.1
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$ROOT/scripts/ensure_venv.sh" python -m edge_train.cli.edge_pipeline "$@"

@@ -1,0 +1,18 @@
+[Unit]
+Description=CoralFlow edge model gateway
+After=network.target
+
+[Service]
+Type=simple
+User=coralflow
+Group=coralflow
+WorkingDirectory=/opt/coralflow/edge_gateway
+Environment=EDGE_MODEL_PATH=/var/lib/coralflow/model.tflite
+Environment=EDGE_GATEWAY_HOST=0.0.0.0
+Environment=EDGE_GATEWAY_PORT=8080
+ExecStart=/opt/coralflow/edge_gateway/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

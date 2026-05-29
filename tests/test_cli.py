@@ -381,12 +381,47 @@ class TestDeployCommand:
         )
         assert result.exit_code != 0
 
-    def test_deploy_no_device(self, runner, tmp_path):
+    def test_deploy_no_device(self, runner, tmp_path, monkeypatch):
+        monkeypatch.delenv("EDGE_DEVICES", raising=False)
+        monkeypatch.delenv("EDGE_DEFAULT_DEVICE", raising=False)
+        monkeypatch.setenv("EDGE_REGISTRY_PATH", str(tmp_path / "missing.json"))
         tflite = tmp_path / "model.tflite"
         tflite.write_bytes(b"fake model")
         result = runner.invoke(deploy, ["--model", str(tflite)])
         assert result.exit_code != 0
-        assert "edge" in result.output.lower() or "cloud" in result.output.lower()
+        assert "EDGE_DEVICES" in result.output or "EDGE_DEFAULT_DEVICE" in result.output
+
+    def test_deploy_list_devices(self, runner, monkeypatch):
+        monkeypatch.setenv(
+            "EDGE_DEVICES",
+            '[{"device_id":"gw1","host":"192.168.1.50","port":8080}]',
+        )
+        result = runner.invoke(deploy, ["--model", "dummy.tflite", "--list-devices"])
+        assert result.exit_code == 0
+        assert "gw1" in result.output
+        assert "192.168.1.50" in result.output
+
+    def test_deploy_default_device_from_env(self, runner, tmp_path, monkeypatch):
+        from edge_train.edge.deploy import DeployResult
+
+        monkeypatch.setenv(
+            "EDGE_DEVICES",
+            '[{"device_id":"gw1","host":"192.168.1.50","port":8080}]',
+        )
+        monkeypatch.setenv("EDGE_DEFAULT_DEVICE", "gw1")
+        tflite = tmp_path / "model.tflite"
+        tflite.write_bytes(b"fake model")
+
+        async def mock_deploy(model_path, **kwargs):
+            return DeployResult(success=True, device_id="gw1", elapsed_sec=1.0)
+
+        monkeypatch.setattr(
+            sys.modules["edge_train.cli.deploy"], "_deploy_model", mock_deploy
+        )
+
+        result = runner.invoke(deploy, ["--model", str(tflite)])
+        assert result.exit_code == 0, result.output
+        assert "gw1" in result.output
 
     def test_deploy_vertex_success(self, runner, monkeypatch, mocker):
         monkeypatch.setenv("GCP_PROJECT", "test-project")

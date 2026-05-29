@@ -34,7 +34,13 @@ def estimate_latency(tflite_path: Path, num_runs: int = 50) -> float:
     output_details = interpreter.get_output_details()
 
     input_shape = input_details[0]["shape"]
-    dummy_input = np.random.rand(*input_shape).astype(np.float32)
+    dtype = input_details[0]["dtype"]
+    if dtype == np.int32:
+        dummy_input = np.zeros(input_shape, dtype=np.int32)
+    elif dtype == np.uint8:
+        dummy_input = np.zeros(input_shape, dtype=np.uint8)
+    else:
+        dummy_input = np.random.rand(*input_shape).astype(np.float32)
 
     # warmup
     interpreter.set_tensor(input_details[0]["index"], dummy_input)

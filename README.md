@@ -20,7 +20,8 @@ coralflow agent
 | Train | `train -d <csv> [-o dir]` | Local TF Keras training (default); `--cloud` for Vertex AI AutoML |
 | Validate | `validate --model <path>` | TFLite conversion, size & latency checks |
 | Predict | `predict --model <path> --text "..."` | Local inference; logs to `prediction_log.jsonl` |
-| Deploy | `deploy --model <path> --device <id>` | Push model to registered edge devices (HTTP) |
+| Deploy | `deploy --model <path> [--device <id>]` | Push TFLite to gateways in `EDGE_DEVICES` (.env) |
+| Edge pipeline | `coralflow-edge-pipeline ./data/urgent.csv` | Train → validate → deploy in one command |
 | Monitor | `monitor` | Phoenix OTEL tracing & retrain triggers |
 | Cost | `cost <dataset>` | Estimate Vertex AI training cost |
 | Agent | `agent` | LLM REPL with tools for the full workflow |
@@ -125,7 +126,10 @@ Uses `builtin:urgent` by default. With `--hard` (default), the baseline never se
 | `PHOENIX_API_KEY` | Phoenix Cloud API key |
 | `PHOENIX_COLLECTOR_ENDPOINT` | OTEL trace endpoint |
 | `PHOENIX_PROJECT_NAME` | Project name in Phoenix (default: `edge-train`) |
-| `EDGE_REGISTRY_PATH` | Edge device registry JSON path |
+| `EDGE_DEVICES` | Edge gateways in `.env` — JSON array or `id@host:port,...` |
+| `EDGE_DEFAULT_DEVICE` | Default gateway id for `coralflow deploy` |
+| `EDGE_REGISTRY_PATH` | Legacy JSON registry fallback (optional) |
+| `EDGE_MODEL_PATH` | Edge gateway model file path (default: `/var/lib/coralflow/model.tflite`) |
 | `EDGE_PREDICTION_LOG_PATH` | Prediction log path (default: `./prediction_log.jsonl`) |
 | `CORALFLOW_LLM_API_KEY` | LLM API key (required for `coralflow agent`) |
 | `CORALFLOW_LLM_ENDPOINT` | OpenAI-compatible API base URL |

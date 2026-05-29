@@ -13,7 +13,7 @@ class TestEdgeConfig:
         assert cfg.push_endpoint == "/api/v1/model"
         assert cfg.checksum_endpoint == "/api/v1/checksum"
 
-    def test_registry_path_env(self, monkeypatch):
-        monkeypatch.setenv("EDGE_REGISTRY_PATH", "/custom/path/devices.json")
+    def test_default_device_env(self, monkeypatch):
+        monkeypatch.setenv("EDGE_DEFAULT_DEVICE", "line1-gw")
         cfg = EdgeConfig()
-        assert cfg.device_registry_path == "/custom/path/devices.json"
+        assert cfg.default_device == "line1-gw"

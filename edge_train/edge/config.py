@@ -8,11 +8,8 @@ from dataclasses import dataclass, field
 class EdgeConfig:
     """Settings for edge device communication and deployment defaults."""
 
-    device_registry_path: str = field(
-        default_factory=lambda: os.environ.get(
-            "EDGE_REGISTRY_PATH",
-            os.path.expanduser("~/.edge-train/devices.json"),
-        )
+    default_device: str = field(
+        default_factory=lambda: os.environ.get("EDGE_DEFAULT_DEVICE", "").strip()
     )
     default_transport: str = "http"
     connection_timeout_sec: int = 30
