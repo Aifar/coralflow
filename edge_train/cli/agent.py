@@ -42,7 +42,7 @@ def agent(
         config.endpoint = endpoint
 
     def _echo(msg: str) -> None:
-        ui.error(msg.strip())
+        ui.notice(msg.strip())
 
     llm = ensure_llm_client(
         config,

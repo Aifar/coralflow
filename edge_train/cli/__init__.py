@@ -17,13 +17,18 @@ from edge_train.cli.demo import demo
 from edge_train.cli.models import models
 
 
-@click.group()
-def main():
+@click.group(invoke_without_command=True)
+@click.pass_context
+def main(ctx):
     """coralflow: TinyML continuous training agent.
 
     Train, deploy, and monitor tiny ML models on edge devices —
     all from the command line, zero GPU needed.
+
+    Run without a subcommand to start the interactive agent (same as `agent`).
     """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(agent)
 
 
 main.add_command(agent)

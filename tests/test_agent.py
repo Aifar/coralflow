@@ -416,21 +416,68 @@ class TestLLMConfig:
     def test_prompt_llm_config_interactive(self):
         from edge_train.agent.llm import LLMConfig, prompt_llm_config_interactive
 
-        answers = iter(["sk-new", "https://custom.example/v1", "gpt-4o-mini"])
+        answers = iter(
+            [
+                "1",  # DeepSeek
+                "",  # default endpoint
+                "sk-new",
+                "deepseek-chat",
+            ]
+        )
         config = prompt_llm_config_interactive(
             LLMConfig(),
             lambda label, *, default="": next(answers),
         )
         assert config.api_key == "sk-new"
-        assert config.endpoint == "https://custom.example/v1"
-        assert config.model == "gpt-4o-mini"
+        assert config.endpoint == "https://api.deepseek.com/v1"
+        assert config.model == "deepseek-chat"
+
+    def test_prompt_llm_config_deepseek_defaults(self):
+        from edge_train.agent.llm import LLMConfig, prompt_llm_config_interactive
+
+        answers = iter(["1", "", "sk-ds", ""])
+        config = prompt_llm_config_interactive(
+            LLMConfig(),
+            lambda label, *, default="": next(answers, default),
+        )
+        assert config.endpoint == "https://api.deepseek.com/v1"
+        assert config.model == "deepseek-chat"
+
+    def test_prompt_llm_config_gemini_defaults(self):
+        from edge_train.agent.llm import LLMConfig, prompt_llm_config_interactive
+
+        answers = iter(["2", "", "sk-gem", ""])
+        config = prompt_llm_config_interactive(
+            LLMConfig(),
+            lambda label, *, default="": next(answers, default),
+        )
+        assert config.endpoint == (
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        )
+        assert config.model == "gemini-2.0-flash"
+
+    def test_detect_llm_provider(self):
+        from edge_train.agent.llm import LLMConfig, detect_llm_provider
+
+        assert detect_llm_provider(
+            LLMConfig(endpoint="https://api.deepseek.com/v1")
+        ) == "deepseek"
+        assert detect_llm_provider(
+            LLMConfig(
+                endpoint="https://generativelanguage.googleapis.com/v1beta/openai"
+            )
+        ) == "gemini"
+        assert detect_llm_provider(
+            LLMConfig(endpoint="https://api.openai.com/v1")
+        ) == "other"
 
     def test_prompt_llm_config_skip_clears_key(self):
         from edge_train.agent.llm import LLMConfig, prompt_llm_config_interactive
 
+        answers = iter(["3", "", "skip"])
         config = prompt_llm_config_interactive(
             LLMConfig(api_key="sk-old", model="gpt-4o"),
-            lambda label, *, default="": "skip",
+            lambda label, *, default="": next(answers, default),
         )
         assert config.api_key == ""
         assert config.model == "gpt-4o"

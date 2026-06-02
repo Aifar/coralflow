@@ -16,6 +16,25 @@ class PromptFn(Protocol):
     def __call__(self, label: str, *, default: str = "") -> str: ...
 
 
+LLM_PROVIDER_PRESETS: dict[str, dict[str, str]] = {
+    "deepseek": {
+        "label": "DeepSeek",
+        "endpoint": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+    },
+    "gemini": {
+        "label": "Gemini",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.0-flash",
+    },
+    "other": {
+        "label": "Other (OpenAI-compatible)",
+        "endpoint": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+    },
+}
+
+
 @dataclass
 class LLMConfig:
     endpoint: str = "https://api.openai.com/v1"
@@ -47,8 +66,69 @@ def _mask_api_key(api_key: str) -> str:
     return f"{key[:4]}...{key[-4:]}"
 
 
-def prompt_llm_config_interactive(config: LLMConfig, prompt_fn: PromptFn) -> LLMConfig:
-    """Prompt for api_key, endpoint, and model one parameter at a time."""
+def detect_llm_provider(config: LLMConfig) -> str:
+    """Infer provider preset from endpoint URL."""
+    endpoint = config.endpoint.lower()
+    if "deepseek" in endpoint:
+        return "deepseek"
+    if "generativelanguage" in endpoint or "googleapis.com" in endpoint:
+        return "gemini"
+    return "other"
+
+
+def format_llm_provider_menu() -> str:
+    lines = ["Choose LLM provider:"]
+    for i, (key, preset) in enumerate(LLM_PROVIDER_PRESETS.items(), 1):
+        lines.append(f"  {i} — {preset['label']}")
+    return "\n".join(lines)
+
+
+def _prompt_llm_provider(
+    prompt_fn: PromptFn,
+    *,
+    echo: Callable[[str], None] | None = None,
+    default: str = "other",
+) -> str:
+    if echo:
+        echo(format_llm_provider_menu())
+
+    choice = prompt_fn("LLM provider [1/2/3]", default=default).strip().lower()
+    if choice in ("1", "deepseek"):
+        return "deepseek"
+    if choice in ("2", "gemini"):
+        return "gemini"
+    if choice in ("3", "other", "openai", "compatible"):
+        return "other"
+    if choice in LLM_PROVIDER_PRESETS:
+        return choice
+    return default
+
+
+def prompt_llm_config_interactive(
+    config: LLMConfig,
+    prompt_fn: PromptFn,
+    *,
+    echo: Callable[[str], None] | None = None,
+) -> LLMConfig:
+    """Prompt for provider, endpoint, api_key, and model one parameter at a time."""
+    initial_provider = detect_llm_provider(config)
+    provider = _prompt_llm_provider(
+        prompt_fn,
+        echo=echo,
+        default=initial_provider,
+    )
+    preset = LLM_PROVIDER_PRESETS[provider]
+
+    endpoint_default = preset["endpoint"]
+    if initial_provider == provider and config.endpoint.strip():
+        endpoint_default = config.endpoint.strip()
+
+    endpoint = prompt_fn(
+        f"LLM endpoint (CORALFLOW_LLM_ENDPOINT) [{endpoint_default}]",
+        default=endpoint_default,
+    ).strip()
+    config.endpoint = endpoint or endpoint_default
+
     api_key = prompt_fn(
         f"LLM API key (CORALFLOW_LLM_API_KEY) [{_mask_api_key(config.api_key)}]",
         default="",
@@ -57,24 +137,20 @@ def prompt_llm_config_interactive(config: LLMConfig, prompt_fn: PromptFn) -> LLM
         return LLMConfig(
             endpoint=config.endpoint,
             api_key="",
-            model=config.model,
+            model=config.model or preset["model"],
         )
     if api_key:
         config.api_key = api_key
 
-    endpoint = prompt_fn(
-        f"LLM endpoint (CORALFLOW_LLM_ENDPOINT) [{config.endpoint}]",
-        default=config.endpoint,
-    ).strip()
-    if endpoint:
-        config.endpoint = endpoint
+    model_default = preset["model"]
+    if initial_provider == provider and config.model.strip():
+        model_default = config.model.strip()
 
     model = prompt_fn(
-        f"LLM model (CORALFLOW_LLM_MODEL) [{config.model}]",
-        default=config.model,
+        f"LLM model (CORALFLOW_LLM_MODEL) [{model_default}]",
+        default=model_default,
     ).strip()
-    if model:
-        config.model = model
+    config.model = model or model_default
 
     return config
 
@@ -128,10 +204,11 @@ def ensure_llm_client(
         if echo:
             echo(format_llm_setup_hint(config))
             echo(
-                "\nEnter LLM settings below (press Enter to keep the shown default).\n"
+                "\nConfigure LLM below: choose provider, then endpoint, API key, "
+                "and model (press Enter to keep the shown default).\n"
             )
 
-        config = prompt_llm_config_interactive(config, prompt_fn)
+        config = prompt_llm_config_interactive(config, prompt_fn, echo=echo)
         llm = LLMClient(config)
 
         if not config.is_valid():

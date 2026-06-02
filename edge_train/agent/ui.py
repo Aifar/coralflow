@@ -60,6 +60,11 @@ class CoralFlowUI:
         """Dimmed / italic status message."""
         self.console.print(f"[dim italic]{text}[/dim italic]")
 
+    def notice(self, text: str) -> None:
+        """Neutral guidance text for setup prompts and configuration menus."""
+        if text:
+            self.console.print(text)
+
     def error(self, text: str) -> None:
         """Red bold error message."""
         self.console.print(f"[bold red]{text}[/bold red]")

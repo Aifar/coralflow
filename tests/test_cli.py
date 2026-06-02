@@ -47,10 +47,22 @@ class TestMainCLI:
         assert "retrain-loop" in result.output
         assert "Demonstration" in result.output
 
-    def test_no_command_shows_help(self, runner):
+    def test_no_command_starts_agent(self, runner, monkeypatch, clear_env):
+        monkeypatch.setenv("CORALFLOW_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(
+            "edge_train.agent.llm.LLMClient.verify_connection",
+            lambda self: (True, ""),
+        )
+        monkeypatch.setattr(
+            "edge_train.agent.loop.run_agent_loop",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            "edge_train.agent.google_env.ensure_google_env_at_startup",
+            lambda *a, **k: False,
+        )
         result = runner.invoke(main, [])
-        # Click group with no subcommand prints help and exits 0
-        assert result.exit_code in (0, 2)
+        assert result.exit_code == 0
 
 
 class TestInitCommands:

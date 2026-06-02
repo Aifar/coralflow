@@ -133,7 +133,7 @@ def _llm_ready(llm: "LLMClient | None", llm_enabled: bool) -> bool:
 
 
 def _show_llm_setup_help(llm: "LLMClient", ui: CoralFlowUI, detail: str) -> None:
-    ui.error(detail)
+    ui.notice(detail)
     ui.panel(format_llm_setup_hint(llm.config), title="Configure LLM")
 
 
@@ -188,7 +188,7 @@ def _offer_llm_recovery_or_manual(
     _show_llm_setup_help(llm, ui, detail)
     ui.info(
         "Options:\n"
-        "  1 — Reconfigure LLM (enter api_key, endpoint, model)\n"
+        "  1 — Reconfigure LLM (provider → endpoint → API key → model)\n"
         "  2 — Run a command manually (enter parameters step by step)\n"
         "  3 — Return to prompt"
     )
@@ -198,7 +198,11 @@ def _offer_llm_recovery_or_manual(
         return llm_enabled, False
 
     if choice == "1":
-        config = prompt_llm_config_interactive(llm.config, _llm_prompt_fn(ui))
+        config = prompt_llm_config_interactive(
+            llm.config,
+            _llm_prompt_fn(ui),
+            echo=lambda msg: ui.notice(msg),
+        )
         llm.config = config
         if not config.is_valid():
             ui.info("Continuing in manual mode.")

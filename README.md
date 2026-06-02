@@ -4,6 +4,22 @@
 
 Seamlessly train, validate, and deploy models to edge devices via CLI. With built-in drift detection, auto-retraining, and HTTP-based updates, our LLM agent takes care of the heavy lifting—managing your entire workflow automatically.
 
+<p align="center">
+  <a href="https://www.tensorflow.org/">TensorFlow</a>
+  &nbsp;·&nbsp;
+  <a href="https://www.tensorflow.org/lite">TensorFlow Lite</a>
+  &nbsp;·&nbsp;
+  <a href="https://cloud.google.com/vertex-ai">Vertex AI</a>
+  &nbsp;·&nbsp;
+  <a href="https://phoenix.arize.com/">Arize Phoenix</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Arize-ai/openinference">OpenInference</a>
+  &nbsp;·&nbsp;
+  <a href="https://platform.deepseek.com/">DeepSeek</a>
+  &nbsp;·&nbsp;
+  <a href="https://ai.google.dev/gemini-api">Gemini</a>
+</p>
+
 **Version:** 0.4.0 · **License:** MIT
 
 ```
