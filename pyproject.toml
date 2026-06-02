@@ -15,6 +15,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
@@ -30,6 +33,11 @@ dependencies = [
     "tensorflow>=2.13",
     "aiohttp>=3.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Aifar/coralflow"
+Repository = "https://github.com/Aifar/coralflow"
+Issues = "https://github.com/Aifar/coralflow/issues"
 
 [project.scripts]
 coralflow = "edge_train.cli:main"

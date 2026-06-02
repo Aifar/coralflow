@@ -231,10 +231,6 @@ def _print_phoenix_menu(echo: Callable[[str], None] | None) -> None:
 def _prompt_gcp_menu(prompt_fn: PromptFn, echo: Callable[[str], None] | None) -> bool:
     """Returns True if user chose to configure GCP."""
     _print_gcp_menu(echo)
-    if gcp_env_ready() and echo:
-        echo(format_gcp_env_hint([]))
-    elif echo:
-        echo(format_gcp_env_hint())
 
     choice = prompt_fn("Google Cloud choice [1/2]").strip().lower()
     return choice in ("1", "configure", "setup", "设置")
